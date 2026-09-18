@@ -112,6 +112,7 @@ import * as ServerSelfUpdate from "./cloud/selfUpdate.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
 import * as ServerSettings from "./serverSettings.ts";
+import { resolveAgentSessionLaunch } from "./terminal/AgentSessionLaunch.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
 import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
 import * as DeviceService from "./device/DeviceService.ts";
@@ -2671,6 +2672,34 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.terminalOpen, terminalManager.open(input), {
             "rpc.aggregate": "terminal",
           }),
+        [WS_METHODS.terminalOpenAgentSession]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.terminalOpenAgentSession,
+            Effect.gen(function* () {
+              const launch = yield* resolveAgentSessionLaunch(
+                input,
+                providerSessionDirectory,
+                serverSettings,
+              );
+              // Resolve before stopping: unsupported providers leave the chat
+              // runtime untouched instead of stranding the thread.
+              yield* providerService.stopSession({ threadId: ThreadId.make(input.threadId) }).pipe(
+                Effect.mapError(
+                  () =>
+                    new TerminalManager.TerminalAgentSessionUnavailableError({
+                      threadId: input.threadId,
+                      reason: "provider-runtime-stop-failed",
+                      provider: launch.provider,
+                    }),
+                ),
+              );
+              return yield* terminalManager.openAgentSession(
+                input,
+                { command: launch.command, args: launch.args },
+              );
+            }),
+            { "rpc.aggregate": "terminal" },
+          ),
         [WS_METHODS.terminalAttach]: (input) =>
           observeRpcStream(
             WS_METHODS.terminalAttach,

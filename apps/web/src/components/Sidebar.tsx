@@ -231,6 +231,7 @@ import {
 } from "./ui/combobox";
 import { SidebarContent, SidebarGroup, useSidebar } from "./ui/sidebar";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
+import { SidebarSurfaceToggle } from "./sidebar/SidebarSurfaceToggle";
 import { SidebarHeaderIconButton, SidebarThreadHeader } from "./sidebar/SidebarThreadHeader";
 import { Popover, PopoverPopup, PopoverTrigger } from "./ui/popover";
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
@@ -2334,6 +2335,8 @@ export default function Sidebar() {
   // app restarts keep it.
   const projectScopeKey = useUiStateStore((store) => store.sidebarProjectScopeKey);
   const setProjectScopeKey = useUiStateStore((store) => store.setSidebarProjectScopeKey);
+  const sidebarWorkspaceSurface = useUiStateStore((store) => store.sidebarWorkspaceSurface);
+  const setSidebarWorkspaceSurface = useUiStateStore((store) => store.setSidebarWorkspaceSurface);
   // {value, label} items let Base UI drive the combobox selection contract
   // while the popup search filters the same collection.
   const projectScopeItems = useMemo(
@@ -4480,6 +4483,10 @@ export default function Sidebar() {
               searchResultCount={threadSearchResults.length}
               activeSearchResultIndex={activeSearchResultIndex}
               onClearSearch={clearThreadSearch}
+            />
+            <SidebarSurfaceToggle
+              surface={sidebarWorkspaceSurface}
+              onSurfaceChange={setSidebarWorkspaceSurface}
             />
           </SidebarGroup>
         }

@@ -84,6 +84,7 @@ import { terminalEnvironment } from "../state/terminal";
 import { openTerminalLinkInPreview } from "./preview/openTerminalLinkInPreview";
 import { useAtomCommand } from "../state/use-atom-command";
 import { preventTerminalCloseShortcut } from "../lib/terminalCloseShortcut";
+import { isAgentWorkspaceTerminalId } from "../lib/agentTerminalCommand";
 import {
   resolveTerminalFontPreference,
   resolveTerminalFontSizePreference,
@@ -987,7 +988,7 @@ export function TerminalViewport({
 }
 
 interface ThreadTerminalDrawerProps {
-  mode?: "drawer" | "panel";
+  mode?: "drawer" | "panel" | "workspace";
   threadRef: ScopedThreadRef;
   threadId: ThreadId;
   cwd: string;
@@ -1076,7 +1077,8 @@ export default function ThreadTerminalDrawer({
   terminalLabelsById,
   terminalLaunchLocationsById,
 }: ThreadTerminalDrawerProps) {
-  const isPanel = mode === "panel";
+  const isPanel = mode !== "drawer";
+  const terminalOwner = mode === "workspace" ? "workspace" : isPanel ? "right-panel" : "drawer";
   const [advancedTypography] = useLocalStorage(
     TYPOGRAPHY_ADVANCED_STORAGE_KEY,
     false,
@@ -1122,11 +1124,14 @@ export default function ThreadTerminalDrawer({
     for (const id of terminalIds) {
       const trimmedId = id.trim();
       if (trimmedId.length === 0 || seen.has(trimmedId)) continue;
+      // The resumed agent TUI belongs exclusively to the Chat | Terminal workspace
+      // surface. Never let stale/shared state render it in Mod+J or the right panel.
+      if (mode !== "workspace" && isAgentWorkspaceTerminalId(trimmedId)) continue;
       seen.add(trimmedId);
       normalizedIds.push(trimmedId);
     }
     return normalizedIds;
-  }, [terminalIds]);
+  }, [mode, terminalIds]);
 
   const resolvedActiveTerminalId =
     normalizedTerminalIds.length === 0
@@ -1392,7 +1397,7 @@ export default function ThreadTerminalDrawer({
   if (normalizedTerminalIds.length === 0) {
     return (
       <aside
-        data-terminal-owner={isPanel ? "right-panel" : "drawer"}
+        data-terminal-owner={terminalOwner}
         className={cn(
           "thread-terminal-drawer relative flex min-w-0 flex-col overflow-hidden bg-background",
           isPanel ? "h-full flex-1" : "shrink-0 border-t border-border/80",
@@ -1422,7 +1427,7 @@ export default function ThreadTerminalDrawer({
 
   return (
     <aside
-      data-terminal-owner={isPanel ? "right-panel" : "drawer"}
+      data-terminal-owner={terminalOwner}
       className={cn(
         "thread-terminal-drawer relative flex min-w-0 flex-col overflow-hidden bg-background",
         isPanel ? "h-full flex-1" : "shrink-0 border-t border-border/80",
@@ -1439,7 +1444,7 @@ export default function ThreadTerminalDrawer({
         />
       ) : null}
 
-      {!hasTerminalSidebar && (
+      {!hasTerminalSidebar && mode !== "workspace" && (
         <div className="pointer-events-none absolute right-2 top-2 z-20">
           <div className="pointer-events-auto inline-flex items-center overflow-hidden rounded-md border border-border/80 bg-background shadow-xs">
             <TerminalActionButton

@@ -24,6 +24,9 @@ const TerminalEnvValueSchema = Schema.String.check(Schema.isMaxLength(8_192));
 const TerminalEnvSchema = Schema.Record(TerminalEnvKeySchema, TerminalEnvValueSchema).check(
   Schema.isMaxProperties(128),
 );
+const TerminalCommandSchema = TrimmedNonEmptyStringSchema.check(Schema.isMaxLength(4_096));
+const TerminalArgSchema = Schema.String.check(Schema.isMaxLength(4_096));
+const TerminalArgsSchema = Schema.Array(TerminalArgSchema).check(Schema.isMaxLength(64));
 
 export const TerminalThreadInput = Schema.Struct({
   threadId: TrimmedNonEmptyStringSchema,
@@ -45,8 +48,26 @@ export const TerminalOpenInput = Schema.Struct({
   rows: Schema.optional(TerminalRowsSchema),
   env: Schema.optional(TerminalEnvSchema),
   providerInstanceId: Schema.optional(ProviderInstanceId),
+  /** Resolved only by trusted server code; clients use terminal.openAgentSession. */
+  command: Schema.optional(TerminalCommandSchema),
+  args: Schema.optional(TerminalArgsSchema),
 });
 export type TerminalOpenInput = typeof TerminalOpenInput.Type;
+
+/**
+ * Opens the interactive CLI that owns this thread's native conversation.
+ * The server resolves both the executable and opaque resume cursor.
+ */
+export const TerminalOpenAgentSessionInput = Schema.Struct({
+  ...TerminalSessionInput.fields,
+  cwd: TrimmedNonEmptyStringSchema,
+  worktreePath: Schema.optional(Schema.NullOr(TrimmedNonEmptyStringSchema)),
+  cols: Schema.optional(TerminalColsSchema),
+  rows: Schema.optional(TerminalRowsSchema),
+  env: Schema.optional(TerminalEnvSchema),
+  providerInstanceId: Schema.optional(ProviderInstanceId),
+});
+export type TerminalOpenAgentSessionInput = typeof TerminalOpenAgentSessionInput.Type;
 
 export const TerminalAttachInput = Schema.Struct({
   ...TerminalSessionInput.fields,
@@ -84,6 +105,8 @@ export const TerminalRestartInput = Schema.Struct({
   rows: TerminalRowsSchema,
   env: Schema.optional(TerminalEnvSchema),
   providerInstanceId: Schema.optional(ProviderInstanceId),
+  command: Schema.optional(TerminalCommandSchema),
+  args: Schema.optional(TerminalArgsSchema),
 });
 export type TerminalRestartInput = typeof TerminalRestartInput.Type;
 
@@ -326,6 +349,25 @@ export class TerminalProviderEnvironmentError extends Schema.TaggedError<Termina
   }
 }
 
+export class TerminalAgentSessionUnavailableError extends Schema.TaggedError<TerminalAgentSessionUnavailableError>()(
+  "TerminalAgentSessionUnavailableError",
+  {
+    threadId: Schema.String,
+    reason: Schema.Literals([
+      "binding-not-found",
+      "resume-not-supported",
+      "resume-cursor-missing",
+      "provider-config-invalid",
+      "provider-runtime-stop-failed",
+    ]),
+    provider: Schema.optional(Schema.String),
+  },
+) {
+  override get message() {
+    return `The native agent session cannot be opened in a terminal for thread: ${this.threadId}`;
+  }
+}
+
 export class TerminalNotRunningError extends Schema.TaggedError<TerminalNotRunningError>()(
   "TerminalNotRunningError",
   {
@@ -374,6 +416,7 @@ export const TerminalError = Schema.Union([
   TerminalSessionLookupError,
   TerminalProviderInstanceNotFoundError,
   TerminalProviderEnvironmentError,
+  TerminalAgentSessionUnavailableError,
   TerminalNotRunningError,
   TerminalWriteError,
   TerminalResizeError,

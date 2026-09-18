@@ -8,6 +8,7 @@ import {
   TerminalCloseInput,
   TerminalEvent,
   TerminalError,
+  TerminalOpenAgentSessionInput,
   TerminalOpenInput,
   TerminalProviderEnvironmentError,
   TerminalResizeInput,
@@ -150,6 +151,18 @@ describe("TerminalOpenInput", () => {
         }),
       ).toBe(false);
     }
+  });
+});
+
+describe("TerminalOpenAgentSessionInput", () => {
+  it("accepts only the location data needed for a server-resolved launch", () => {
+    expect(
+      decodes(TerminalOpenAgentSessionInput, {
+        threadId: "thread-1",
+        terminalId: "term-agent",
+        cwd: "/tmp/project",
+      }),
+    ).toBe(true);
   });
 });
 

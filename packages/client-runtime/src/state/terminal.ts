@@ -63,6 +63,12 @@ export function createTerminalEnvironmentAtoms<R, E>(
       scheduler: lifecycleScheduler,
       concurrency: lifecycleConcurrency,
     }),
+    openAgentSession: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:terminal:open-agent-session",
+      tag: WS_METHODS.terminalOpenAgentSession,
+      scheduler: lifecycleScheduler,
+      concurrency: lifecycleConcurrency,
+    }),
     write: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:terminal:write",
       tag: WS_METHODS.terminalWrite,

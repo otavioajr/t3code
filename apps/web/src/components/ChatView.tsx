@@ -168,6 +168,10 @@ import { useTheme } from "../hooks/useTheme";
 import { writeTextToClipboard } from "../hooks/useCopyToClipboard";
 import { isCommandPaletteOpen } from "../commandPaletteBus";
 import { subscribeSnapShotComposerFocus } from "../lib/desktopSnapShot";
+import {
+  AGENT_TERMINAL_ID,
+  isAgentWorkspaceTerminalId,
+} from "../lib/agentTerminalCommand";
 import { buildTemporaryWorktreeBranchName } from "@t3tools/shared/git";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../rightPanelLayout";
@@ -903,7 +907,11 @@ const PersistentThreadTerminalDrawer = memo(function PersistentThreadTerminalDra
   );
   const drawerTerminalSessions = useMemo(
     () =>
-      knownTerminalSessions.filter((session) => !panelTerminalIds.has(session.target.terminalId)),
+      knownTerminalSessions.filter(
+        (session) =>
+          !isAgentWorkspaceTerminalId(session.target.terminalId) &&
+          !panelTerminalIds.has(session.target.terminalId),
+      ),
     [knownTerminalSessions, panelTerminalIds],
   );
   const terminalLabelsById = useMemo(() => {
@@ -952,6 +960,20 @@ const PersistentThreadTerminalDrawer = memo(function PersistentThreadTerminalDra
     () => drawerTerminalSessions.map((session) => session.target.terminalId),
     [drawerTerminalSessions],
   );
+  // The agent TUI belongs only to the Chat|Terminal workspace. Older state may
+  // still contain it, so filter it before rendering or reconciling Mod+J.
+  const drawerTerminalIds = useMemo(
+    () => terminalUiState.terminalIds.filter((id) => !isAgentWorkspaceTerminalId(id)),
+    [terminalUiState.terminalIds],
+  );
+  const drawerTerminalGroups = useMemo(
+    () =>
+      terminalUiState.terminalGroups.map((group) => ({
+        ...group,
+        terminalIds: group.terminalIds.filter((id) => !isAgentWorkspaceTerminalId(id)),
+      })),
+    [terminalUiState.terminalGroups],
+  );
   // Every client-side id source participates in allocation: the server list
   // lags fresh opens, and panel terminals are filtered out of the drawer's
   // sessions — an id collision attaches two viewports to one PTY session.
@@ -959,11 +981,11 @@ const PersistentThreadTerminalDrawer = memo(function PersistentThreadTerminalDra
     () => [
       ...new Set([
         ...serverOrderedTerminalIds,
-        ...terminalUiState.terminalIds,
+        ...drawerTerminalIds,
         ...panelTerminalIds,
       ]),
     ],
-    [panelTerminalIds, serverOrderedTerminalIds, terminalUiState.terminalIds],
+    [drawerTerminalIds, panelTerminalIds, serverOrderedTerminalIds],
   );
   const storeSetTerminalHeight = useTerminalUiStateStore((state) => state.setTerminalHeight);
   const storeSplitTerminal = useTerminalUiStateStore((state) => state.splitTerminal);
@@ -976,16 +998,14 @@ const PersistentThreadTerminalDrawer = memo(function PersistentThreadTerminalDra
   const reconcileTerminalIds = useTerminalUiStateStore((state) => state.reconcileTerminalIds);
 
   useEffect(() => {
-    if (terminalIdListsEqual(serverOrderedTerminalIds, terminalUiState.terminalIds)) {
+    if (terminalIdListsEqual(serverOrderedTerminalIds, drawerTerminalIds)) {
       return;
     }
-    if (
-      serverTerminalIdsStrictSubsetOfClient(serverOrderedTerminalIds, terminalUiState.terminalIds)
-    ) {
+    if (serverTerminalIdsStrictSubsetOfClient(serverOrderedTerminalIds, drawerTerminalIds)) {
       return;
     }
     reconcileTerminalIds(threadRef, serverOrderedTerminalIds);
-  }, [reconcileTerminalIds, serverOrderedTerminalIds, terminalUiState.terminalIds, threadRef]);
+  }, [drawerTerminalIds, reconcileTerminalIds, serverOrderedTerminalIds, threadRef]);
   const [localFocusRequestId, setLocalFocusRequestId] = useState(0);
   const worktreePath = serverThread?.worktreePath ?? draftThread?.worktreePath ?? null;
   const effectiveWorktreePath = useMemo(() => {
@@ -1169,9 +1189,49 @@ const PersistentThreadTerminalDrawer = memo(function PersistentThreadTerminalDra
     [onAddTerminalContext, visible],
   );
 
-  if (!project || (!terminalUiState.terminalOpen && !active) || !cwd) {
+  if (!project || !cwd) {
     return null;
   }
+  if (!terminalUiState.terminalOpen && !active) {
+    return null;
+  }
+
+  const drawer = (
+    <ThreadTerminalDrawer
+      mode="drawer"
+      threadRef={threadRef}
+      threadId={threadId}
+      cwd={cwd}
+      worktreePath={effectiveWorktreePath}
+      runtimeEnv={runtimeEnv}
+      visible={visible}
+      height={terminalUiState.terminalHeight}
+      // Known-session order is MRU and changes on focus; persisted store order keeps sidebar labels stable.
+      terminalIds={drawerTerminalIds}
+      activeTerminalId={
+        isAgentWorkspaceTerminalId(terminalUiState.activeTerminalId)
+          ? (drawerTerminalIds[0] ?? "")
+          : terminalUiState.activeTerminalId
+      }
+      terminalGroups={drawerTerminalGroups}
+      activeTerminalGroupId={terminalUiState.activeTerminalGroupId}
+      focusRequestId={focusRequestId + localFocusRequestId + (visible ? 1 : 0)}
+      onSplitTerminal={splitTerminal}
+      onSplitTerminalVertical={splitTerminalVertical}
+      onNewTerminal={createNewTerminal}
+      splitShortcutLabel={visible ? splitShortcutLabel : undefined}
+      splitVerticalShortcutLabel={visible ? splitVerticalShortcutLabel : undefined}
+      newShortcutLabel={visible ? newShortcutLabel : undefined}
+      closeShortcutLabel={visible ? closeShortcutLabel : undefined}
+      keybindings={keybindings}
+      onActiveTerminalChange={activateTerminal}
+      onCloseTerminal={closeTerminal}
+      onHeightChange={setTerminalHeight}
+      onAddTerminalContext={handleAddTerminalContext}
+      terminalLabelsById={terminalLabelsById}
+      terminalLaunchLocationsById={terminalLaunchLocationsById}
+    />
+  );
 
   return (
     <div
@@ -1183,37 +1243,102 @@ const PersistentThreadTerminalDrawer = memo(function PersistentThreadTerminalDra
         active && visible && "[[data-panel-animations=true]_&]:starting:grid-rows-[0fr]!",
       )}
     >
-      <div className="min-h-0 overflow-clip">
-        <ThreadTerminalDrawer
-          threadRef={threadRef}
-          threadId={threadId}
-          cwd={cwd}
-          worktreePath={effectiveWorktreePath}
-          runtimeEnv={runtimeEnv}
-          visible={visible}
-          height={terminalUiState.terminalHeight}
-          // Known-session order is MRU and changes on focus; persisted store order keeps sidebar labels stable.
-          terminalIds={terminalUiState.terminalIds}
-          activeTerminalId={terminalUiState.activeTerminalId}
-          terminalGroups={terminalUiState.terminalGroups}
-          activeTerminalGroupId={terminalUiState.activeTerminalGroupId}
-          focusRequestId={focusRequestId + localFocusRequestId + (visible ? 1 : 0)}
-          onSplitTerminal={splitTerminal}
-          onSplitTerminalVertical={splitTerminalVertical}
-          onNewTerminal={createNewTerminal}
-          splitShortcutLabel={visible ? splitShortcutLabel : undefined}
-          splitVerticalShortcutLabel={visible ? splitVerticalShortcutLabel : undefined}
-          newShortcutLabel={visible ? newShortcutLabel : undefined}
-          closeShortcutLabel={visible ? closeShortcutLabel : undefined}
-          keybindings={keybindings}
-          onActiveTerminalChange={activateTerminal}
-          onCloseTerminal={closeTerminal}
-          onHeightChange={setTerminalHeight}
-          onAddTerminalContext={handleAddTerminalContext}
-          terminalLabelsById={terminalLabelsById}
-          terminalLaunchLocationsById={terminalLaunchLocationsById}
-        />
+      <div className="min-h-0 overflow-clip">{drawer}</div>
+    </div>
+  );
+});
+
+interface AgentWorkspaceTerminalProps {
+  threadRef: ScopedThreadRef;
+  launchContext: PersistentTerminalLaunchContext | null;
+  focusRequestId: number;
+  keybindings: ResolvedKeybindingsConfig;
+  onAddTerminalContext: (selection: TerminalContextSelection) => void;
+}
+
+/**
+ * Renders the resumed agent TUI without reading or mutating the Mod+J store.
+ * Project resolution stays local so its fixed PTY never enters drawer state.
+ */
+const AgentWorkspaceTerminal = memo(function AgentWorkspaceTerminal({
+  threadRef,
+  launchContext,
+  focusRequestId,
+  keybindings,
+  onAddTerminalContext,
+}: AgentWorkspaceTerminalProps) {
+  const draftThread = useComposerDraftStore((store) => store.getDraftThreadByRef(threadRef));
+  const serverThread = useThread(threadRef, { waitForShell: draftThread !== null });
+  const projectRef = serverThread
+    ? scopeProjectRef(serverThread.environmentId, serverThread.projectId)
+    : draftThread
+      ? scopeProjectRef(draftThread.environmentId, draftThread.projectId)
+      : null;
+  const project = useProject(projectRef);
+  const worktreePath =
+    launchContext?.worktreePath ?? serverThread?.worktreePath ?? draftThread?.worktreePath ?? null;
+  const cwd =
+    launchContext?.cwd ??
+    (project
+      ? projectScriptCwd({
+          project: { cwd: project.workspaceRoot },
+          worktreePath,
+        })
+      : null);
+  const runtimeEnv = useMemo(
+    () =>
+      project
+        ? projectScriptRuntimeEnv({
+            project: { cwd: project.workspaceRoot },
+            worktreePath,
+          })
+        : {},
+    [project, worktreePath],
+  );
+  const terminalLabelsById = useMemo(() => new Map([[AGENT_TERMINAL_ID, "Agent"]]), []);
+
+  if (!project || !cwd) {
+    return (
+      <div className="flex min-h-0 flex-1 items-center justify-center px-4 text-center text-sm text-muted-foreground">
+        Open a project thread to use the agent terminal.
       </div>
+    );
+  }
+
+  return (
+    <div
+      className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
+      data-thread-workspace-terminal="true"
+    >
+      <ThreadTerminalDrawer
+        mode="workspace"
+        threadRef={threadRef}
+        threadId={threadRef.threadId}
+        cwd={cwd}
+        worktreePath={worktreePath}
+        runtimeEnv={runtimeEnv}
+        visible
+        height={0}
+        terminalIds={[AGENT_TERMINAL_ID]}
+        activeTerminalId={AGENT_TERMINAL_ID}
+        terminalGroups={[
+          {
+            id: "agent-workspace",
+            terminalIds: [AGENT_TERMINAL_ID],
+          },
+        ]}
+        activeTerminalGroupId="agent-workspace"
+        focusRequestId={focusRequestId}
+        onSplitTerminal={() => undefined}
+        onSplitTerminalVertical={() => undefined}
+        onNewTerminal={() => undefined}
+        onActiveTerminalChange={() => undefined}
+        onCloseTerminal={() => undefined}
+        onHeightChange={() => undefined}
+        onAddTerminalContext={onAddTerminalContext}
+        terminalLabelsById={terminalLabelsById}
+        keybindings={keybindings}
+      />
     </div>
   );
 });
@@ -1455,6 +1580,9 @@ export default function ChatView(props: ChatViewProps) {
     reportFailure: false,
   });
   const openTerminal = useAtomCommand(terminalEnvironment.open, "terminal open");
+  const openAgentTerminal = useAtomCommand(terminalEnvironment.openAgentSession, {
+    reportFailure: false,
+  });
   const writeTerminal = useAtomCommand(terminalEnvironment.write, "terminal write");
   const closeTerminalMutation = useAtomCommand(terminalEnvironment.close, "terminal close");
   const createThread = useAtomCommand(threadEnvironment.create, { reportFailure: false });
@@ -1540,6 +1668,11 @@ export default function ChatView(props: ChatViewProps) {
     };
   }, [routeKind, routeThreadRef, routeThreadState]);
   const markThreadVisited = useUiStateStore((store) => store.markThreadVisited);
+  const sidebarWorkspaceSurface = useUiStateStore((store) => store.sidebarWorkspaceSurface);
+  const setSidebarWorkspaceSurface = useUiStateStore(
+    (store) => store.setSidebarWorkspaceSurface,
+  );
+  const previousSidebarWorkspaceSurfaceRef = useRef(sidebarWorkspaceSurface);
   const settings = useEnvironmentSettings(environmentId);
   const setStickyComposerModelSelection = useComposerDraftStore(
     (store) => store.setStickyModelSelection,
@@ -1735,6 +1868,13 @@ export default function ChatView(props: ChatViewProps) {
   const environmentUnavailableSendToastSlotRef = useRef(0);
   const feedbackUploadsInFlightRef = useRef(new Set<string>());
   const terminalUiOpenByThreadRef = useRef<Record<string, boolean>>({});
+  const workspaceTerminalLaunchKeyRef = useRef<string | null>(null);
+  const workspaceTerminalOwnerRef = useRef<{
+    readonly threadRef: ScopedThreadRef;
+    readonly threadId: ThreadId;
+    readonly environmentId: EnvironmentId;
+  } | null>(null);
+  const [workspaceTerminalHandoffPending, setWorkspaceTerminalHandoffPending] = useState(false);
 
   const terminalUiState = useTerminalUiStateStore((state) =>
     selectThreadTerminalUiState(state.terminalUiStateByThreadKey, routeThreadRef),
@@ -3741,6 +3881,96 @@ export default function ChatView(props: ChatViewProps) {
     storeEnsureTerminal,
     terminalUiState.terminalIds.length,
     terminalUiState.terminalOpen,
+  ]);
+  // Sidebar Terminal owns a dedicated PTY. It never enters terminalUiStateStore,
+  // which is reserved for Mod+J and right-panel shells.
+  useEffect(() => {
+    if (sidebarWorkspaceSurface !== "terminal") {
+      workspaceTerminalLaunchKeyRef.current = null;
+      return;
+    }
+    if (!activeThreadRef || !activeThreadId || !activeProject) return;
+    const cwdForOpen = gitCwd ?? activeProject.workspaceRoot;
+    if (!cwdForOpen) return;
+
+    const terminalId = AGENT_TERMINAL_ID;
+    const launchKey = `${activeThreadKey}:${terminalId}:${cwdForOpen}`;
+    if (workspaceTerminalLaunchKeyRef.current === launchKey) return;
+    workspaceTerminalLaunchKeyRef.current = launchKey;
+
+    setTerminalFocusRequestId((value) => value + 1);
+    void openAgentTerminal({
+      environmentId,
+      input: {
+        threadId: activeThreadId,
+        terminalId,
+        cwd: cwdForOpen,
+        ...(activeThreadWorktreePath != null ? { worktreePath: activeThreadWorktreePath } : {}),
+        env: projectScriptRuntimeEnv({
+          project: { cwd: activeProject.workspaceRoot },
+          worktreePath: activeThreadWorktreePath,
+        }),
+      },
+    }).then((result) => {
+      if (result._tag === "Success") {
+        workspaceTerminalOwnerRef.current = {
+          threadRef: activeThreadRef,
+          threadId: activeThreadId,
+          environmentId,
+        };
+        return;
+      }
+      if (isAtomCommandInterrupted(result)) return;
+      workspaceTerminalLaunchKeyRef.current = null;
+      const error = squashAtomCommandFailure(result);
+      setThreadError(
+        activeThreadId,
+        error instanceof Error ? error.message : "Could not resume this agent session.",
+      );
+      setSidebarWorkspaceSurface("chat");
+    });
+  }, [
+    activeProject,
+    activeThreadId,
+    activeThreadKey,
+    activeThreadRef,
+    activeThreadWorktreePath,
+    environmentId,
+    gitCwd,
+    openAgentTerminal,
+    sidebarWorkspaceSurface,
+    setSidebarWorkspaceSurface,
+    setThreadError,
+  ]);
+  useEffect(() => {
+    const owner = workspaceTerminalOwnerRef.current;
+    if (sidebarWorkspaceSurface !== "chat" || owner === null) return;
+
+    // Keep the composer unavailable until the TUI releases the native session.
+    // On failure, return to Terminal instead of allowing concurrent writers.
+    setWorkspaceTerminalHandoffPending(true);
+    void closeTerminalMutation({
+      environmentId: owner.environmentId,
+      input: {
+        threadId: owner.threadId,
+        terminalId: AGENT_TERMINAL_ID,
+        deleteHistory: false,
+      },
+    }).then((result) => {
+      if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+        setThreadError(owner.threadId, chatActionErrorMessage(squashAtomCommandFailure(result)));
+        setSidebarWorkspaceSurface("terminal");
+        return;
+      }
+      workspaceTerminalOwnerRef.current = null;
+    }).finally(() => {
+      setWorkspaceTerminalHandoffPending(false);
+    });
+  }, [
+    closeTerminalMutation,
+    setSidebarWorkspaceSurface,
+    setThreadError,
+    sidebarWorkspaceSurface,
   ]);
   const splitTerminal = useCallback(
     (direction: "horizontal" | "vertical" = "horizontal") => {
@@ -8744,8 +8974,18 @@ export default function ChatView(props: ChatViewProps) {
             </div>
             {/* Messages Wrapper */}
             <div className="relative flex min-h-0 flex-1 flex-col bg-background">
+              {sidebarWorkspaceSurface === "terminal" && activeThreadRef ? (
+                <AgentWorkspaceTerminal
+                  threadRef={activeThreadRef}
+                  launchContext={activeTerminalLaunchContext ?? null}
+                  focusRequestId={terminalFocusRequestId}
+                  keybindings={keybindings}
+                  onAddTerminalContext={addTerminalContextToDraft}
+                />
+              ) : null}
               {/* Messages — LegendList handles virtualization and scrolling internally */}
-              <MessagesTimeline
+              {sidebarWorkspaceSurface === "chat" ? (
+                <MessagesTimeline
                 citationRequest={paintOnlyDisplayedTimeline ? null : citationRequest}
                 citationHistoryLoading={threadDetailLoading}
                 {...(!paintOnlyDisplayedTimeline
@@ -8816,9 +9056,10 @@ export default function ChatView(props: ChatViewProps) {
                 topFadeEnabled={!hasTimelineTopBanner}
                 loadEarlier={paintOnlyDisplayedTimeline ? null : loadEarlierTurns}
               />
+              ) : null}
 
               {/* scroll to end pill — shown when user has scrolled away from the live edge */}
-              {showScrollToBottom && (
+              {sidebarWorkspaceSurface === "chat" && showScrollToBottom && (
                 <div
                   className="pointer-events-none absolute left-1/2 z-30 flex -translate-x-1/2 justify-center py-1.5"
                   style={{ bottom: scrollToEndClearance + 4 }}
@@ -8844,7 +9085,14 @@ export default function ChatView(props: ChatViewProps) {
             {/* Input bar — centered hero while a draft has no messages, docked at the bottom otherwise */}
             <div
               ref={setComposerOverlayElement}
-              inert={isRevertingCheckpoint}
+              inert={
+                isRevertingCheckpoint ||
+                sidebarWorkspaceSurface === "terminal" ||
+                workspaceTerminalHandoffPending
+              }
+              hidden={
+                sidebarWorkspaceSurface === "terminal" || workspaceTerminalHandoffPending
+              }
               data-chat-composer-overlay="true"
               className={
                 isDraftHeroState
@@ -9137,7 +9385,8 @@ export default function ChatView(props: ChatViewProps) {
         </div>
         {/* end horizontal flex container */}
 
-        {mountedTerminalThreadRefs.map(({ key: mountedThreadKey, threadRef: mountedThreadRef }) => (
+        {mountedTerminalThreadRefs.map(({ key: mountedThreadKey, threadRef: mountedThreadRef }) =>
+          sidebarWorkspaceSurface === "terminal" && mountedThreadKey === activeThreadKey ? null : (
           <PersistentThreadTerminalDrawer
             key={mountedThreadKey}
             threadRef={mountedThreadRef}
@@ -9154,7 +9403,8 @@ export default function ChatView(props: ChatViewProps) {
             keybindings={keybindings}
             onAddTerminalContext={addTerminalContextToDraft}
           />
-        ))}
+          ),
+        )}
       </div>
 
       {rightPanelPresent && !shouldUseRightPanelSheet && activeThreadRef ? (

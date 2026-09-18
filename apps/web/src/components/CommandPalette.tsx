@@ -52,6 +52,7 @@ import {
   PaletteIcon,
   SettingsIcon,
   SquarePenIcon,
+  TerminalSquareIcon,
   TextSearchIcon,
 } from "lucide-react";
 import {
@@ -689,6 +690,8 @@ function OpenCommandPaletteDialog(props: {
     }
   }, [activeThreadReferenceCopyTarget]);
   const projectOrder = useUiStateStore((store) => store.projectOrder);
+  const sidebarWorkspaceSurface = useUiStateStore((store) => store.sidebarWorkspaceSurface);
+  const setSidebarWorkspaceSurface = useUiStateStore((store) => store.setSidebarWorkspaceSurface);
   const threads = useThreadShells();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const { theme, themeHalves, resolvedTheme } = useTheme();
@@ -1673,6 +1676,22 @@ function OpenCommandPaletteDialog(props: {
       groups: [{ value: "projects", label: "Projects", items: projectThreadItems }],
     });
   }
+
+  actionItems.push({
+    kind: "action",
+    value: "action:workspace-surface",
+    searchTerms: ["terminal", "chat", "ghostty", "pty", "shell"],
+    title: sidebarWorkspaceSurface === "terminal" ? "Show chat" : "Show thread terminal",
+    icon:
+      sidebarWorkspaceSurface === "terminal" ? (
+        <MessageSquareIcon className={ITEM_ICON_CLASS} />
+      ) : (
+        <TerminalSquareIcon className={ITEM_ICON_CLASS} />
+      ),
+    run: async () => {
+      setSidebarWorkspaceSurface(sidebarWorkspaceSurface === "terminal" ? "chat" : "terminal");
+    },
+  });
 
   if (activeThreadReferenceCopyTarget !== null) {
     actionItems.push({

@@ -160,6 +160,7 @@ import {
   TerminalError,
   TerminalEvent,
   TerminalMetadataStreamEvent,
+  TerminalOpenAgentSessionInput,
   TerminalOpenInput,
   TerminalResizeInput,
   TerminalRestartInput,
@@ -308,6 +309,7 @@ export const WS_METHODS = {
 
   // Terminal methods
   terminalOpen: "terminal.open",
+  terminalOpenAgentSession: "terminal.openAgentSession",
   terminalAttach: "terminal.attach",
   terminalWrite: "terminal.write",
   terminalResize: "terminal.resize",
@@ -999,6 +1001,12 @@ const WsTerminalOpenRpc = Rpc.make(WS_METHODS.terminalOpen, {
   error: Schema.Union([TerminalError, EnvironmentAuthorizationError]),
 });
 
+const WsTerminalOpenAgentSessionRpc = Rpc.make(WS_METHODS.terminalOpenAgentSession, {
+  payload: TerminalOpenAgentSessionInput,
+  success: TerminalSessionSnapshot,
+  error: Schema.Union([TerminalError, EnvironmentAuthorizationError]),
+});
+
 const WsTerminalAttachRpc = Rpc.make(WS_METHODS.terminalAttach, {
   payload: TerminalAttachInput,
   success: TerminalAttachStreamEvent,
@@ -1367,6 +1375,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsReviewGetDiffPreviewRpc,
   WsReviewGetDiffFileContentsRpc,
   WsTerminalOpenRpc,
+  WsTerminalOpenAgentSessionRpc,
   WsTerminalAttachRpc,
   WsTerminalWriteRpc,
   WsTerminalResizeRpc,

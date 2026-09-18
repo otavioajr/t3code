@@ -422,6 +422,23 @@ it.layer(
     }),
   );
 
+  it.effect("spawns the server-selected agent TUI command", () =>
+    Effect.gen(function* () {
+      const { manager, ptyAdapter } = yield* createManager();
+
+      yield* manager.openAgentSession(openInput(), {
+        command: "claude",
+        args: ["--resume", "session-1"],
+      });
+
+      expect(ptyAdapter.spawnInputs).toHaveLength(1);
+      expect(ptyAdapter.spawnInputs[0]).toMatchObject({
+        shell: "claude",
+        args: ["--resume", "session-1"],
+      });
+    }),
+  );
+
   it.effect("attaches to running sessions without restarting them", () =>
     Effect.gen(function* () {
       const { manager, ptyAdapter } = yield* createManager();
@@ -2128,6 +2145,35 @@ it.layer(
         ServerSettings.ServerSettingsService.layerTest({
           providerInstances: {},
           providers: { claudeAgent: { homePath: "~/.claude-legacy" } },
+        }),
+      ),
+    ),
+  );
+
+  it.effect("uses Antigravity's private profile for its interactive TUI", () =>
+    Effect.gen(function* () {
+      const path = yield* Path.Path;
+      const serverSettings = yield* ServerSettings.ServerSettingsService;
+      const environment = yield* TerminalManager.resolveProviderInstanceTerminalEnvironment({
+        serverSettings,
+        path,
+        stateDir: "/t3/userdata",
+        rawProviderInstanceId: "antigravity_work",
+        env: undefined,
+      });
+
+      expect(environment.GEMINI_HOME).toMatch(
+        /^\/t3\/userdata\/providers\/antigravity\/[a-f0-9]{64}$/,
+      );
+    }).pipe(
+      Effect.provide(
+        ServerSettings.ServerSettingsService.layerTest({
+          providerInstances: {
+            [ProviderInstanceId.make("antigravity_work")]: {
+              driver: "antigravity",
+              config: {},
+            },
+          },
         }),
       ),
     ),

@@ -13,6 +13,7 @@ import {
   TerminalCwdNotFoundError,
   TerminalCwdStatError,
   TerminalError,
+  TerminalAgentSessionUnavailableError,
   TerminalHistoryError,
   TerminalNotRunningError,
   TerminalProviderInstanceNotFoundError,
@@ -26,6 +27,7 @@ import {
   type TerminalCloseInput,
   type TerminalEvent,
   type TerminalMetadataStreamEvent,
+  type TerminalOpenAgentSessionInput,
   type TerminalOpenInput,
   type TerminalResizeInput,
   type ResourceMonitorProcessTableEntry,
@@ -58,6 +60,7 @@ import * as Semaphore from "effect/Semaphore";
 import * as SynchronizedRef from "effect/SynchronizedRef";
 
 import * as ServerConfig from "../config.ts";
+import { resolveAntigravityProfileDirectory } from "../provider/antigravityAuthSupport.ts";
 import { mergeProviderInstanceEnvironment } from "../provider/ProviderInstanceEnvironment.ts";
 import { resolveCodexHomeLayout } from "../provider/Drivers/CodexHomeLayout.ts";
 import { makeClaudeEnvironment } from "../provider/Drivers/ClaudeHome.ts";
@@ -80,6 +83,7 @@ export {
   TerminalCwdNotFoundError,
   TerminalCwdStatError,
   TerminalError,
+  TerminalAgentSessionUnavailableError,
   TerminalHistoryError,
   TerminalNotRunningError,
   TerminalProviderInstanceNotFoundError,
@@ -154,6 +158,15 @@ export class TerminalManager extends Context.Service<
      */
     readonly open: (
       input: TerminalOpenInput,
+    ) => Effect.Effect<TerminalSessionSnapshot, TerminalError>;
+
+    /**
+     * Start an executable selected by the server for a provider-native session.
+     * This keeps command/argument selection outside the remote client boundary.
+     */
+    readonly openAgentSession: (
+      input: TerminalOpenAgentSessionInput,
+      launch: { readonly command: string; readonly args: ReadonlyArray<string> },
     ) => Effect.Effect<TerminalSessionSnapshot, TerminalError>;
 
     /**
@@ -258,6 +271,11 @@ export interface TerminalStartInput extends TerminalOpenInput {
   rows: number;
 }
 
+type AgentTerminalOpenInput = TerminalOpenInput & {
+  readonly command: string;
+  readonly args: ReadonlyArray<string>;
+};
+
 interface TerminalSessionState {
   threadId: string;
   terminalId: string;
@@ -283,6 +301,9 @@ interface TerminalSessionState {
   /** Normalized child command name when `hasRunningSubprocess`; cleared when idle. */
   childCommandLabel: string | null;
   runtimeEnv: Record<string, string> | null;
+  /** Explicit executable for agent TUI sessions; null means the user's shell. */
+  launchCommand: string | null;
+  launchArgs: ReadonlyArray<string> | null;
 }
 
 interface PersistHistoryRequest {
@@ -1349,6 +1370,7 @@ export const resolveProviderInstanceTerminalEnvironment = Effect.fn(
 )(function* (input: {
   readonly serverSettings: ServerSettings.ServerSettingsService["Service"];
   readonly path: Path.Path;
+  readonly stateDir?: string;
   readonly rawProviderInstanceId: string;
   readonly env: Record<string, string> | undefined;
 }) {
@@ -1378,6 +1400,14 @@ export const resolveProviderInstanceTerminalEnvironment = Effect.fn(
         Effect.provideService(Path.Path, input.path),
       );
     }
+  } else if (instance.driver === "antigravity" && input.stateDir) {
+    // `agy` stores conversations under the same private profile used by the
+    // ACP adapter. Without this handoff it would open an unrelated user profile.
+    resolved = {
+      ...resolved,
+      GEMINI_HOME: resolveAntigravityProfileDirectory(input.stateDir, providerInstanceId),
+      AGY_ACP_FORCE_FILE_STORAGE: "1",
+    };
   }
 
   return Object.fromEntries(
@@ -1387,7 +1417,7 @@ export const resolveProviderInstanceTerminalEnvironment = Effect.fn(
 
 /** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.fn("TerminalManager.make")(function* () {
-  const { terminalLogsDir } = yield* ServerConfig.ServerConfig;
+  const { stateDir, terminalLogsDir } = yield* ServerConfig.ServerConfig;
   const ptyAdapter = yield* PtyAdapter.PtyAdapter;
   const portDiscovery = yield* PortScanner.PortDiscovery;
   const nativeTelemetry = yield* NativeTelemetryClient.NativeTelemetryClient;
@@ -1399,6 +1429,7 @@ export const make = Effect.fn("TerminalManager.make")(function* () {
     resolveProviderInstanceTerminalEnvironment({
       serverSettings,
       path,
+      stateDir,
       rawProviderInstanceId,
       env,
     }),
@@ -2221,7 +2252,16 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
       increment(terminalSessionsTotal, { lifecycle: eventType }).pipe(
         Effect.andThen(
           Effect.gen(function* () {
-            const shellCandidates = resolveShellCandidates(shellResolver, platform, baseEnv);
+            const shellCandidates = session.launchCommand
+              ? [
+                  {
+                    shell: session.launchCommand,
+                    ...(session.launchArgs && session.launchArgs.length > 0
+                      ? { args: [...session.launchArgs] }
+                      : {}),
+                  },
+                ]
+              : resolveShellCandidates(shellResolver, platform, baseEnv);
             const terminalEnv = createTerminalSpawnEnv(baseEnv, session.runtimeEnv);
             const spawnResult = yield* trySpawn(shellCandidates, terminalEnv, session);
             ptyProcess = spawnResult.process;
@@ -2516,7 +2556,11 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
     }).pipe(Effect.ignoreCause({ log: true })),
   );
 
-  const openLocked = Effect.fn("terminal.openLocked")(function* (input: TerminalOpenInput) {
+  const openLocked = Effect.fn("terminal.openLocked")(function* (
+    input: TerminalOpenInput | AgentTerminalOpenInput,
+  ) {
+    const command = "command" in input ? input.command : undefined;
+    const args = "args" in input ? input.args : undefined;
     const terminalId = input.terminalId;
     yield* assertValidCwd(input.cwd);
 
@@ -2551,6 +2595,8 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
         hasRunningSubprocess: false,
         childCommandLabel: null,
         runtimeEnv: normalizedRuntimeEnv(input.env),
+        launchCommand: command ?? null,
+        launchArgs: args && args.length > 0 ? [...args] : null,
       };
 
       const createdSession = session;
@@ -2585,16 +2631,29 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
     const runtimeEnvChanged = !Equal.equals(currentRuntimeEnv, nextRuntimeEnv);
     const nextWorktreePath =
       input.worktreePath !== undefined ? (input.worktreePath ?? null) : liveSession.worktreePath;
+    const nextLaunchCommand = command !== undefined ? command : liveSession.launchCommand;
+    const nextLaunchArgs =
+      args !== undefined
+        ? args.length > 0
+          ? [...args]
+          : null
+        : liveSession.launchArgs;
+    const launchCommandChanged =
+      nextLaunchCommand !== liveSession.launchCommand ||
+      !Equal.equals(nextLaunchArgs, liveSession.launchArgs);
     const launchContextChanged =
       liveSession.cwd !== input.cwd ||
       runtimeEnvChanged ||
-      liveSession.worktreePath !== nextWorktreePath;
+      liveSession.worktreePath !== nextWorktreePath ||
+      launchCommandChanged;
 
     if (launchContextChanged) {
       yield* stopProcess(liveSession);
       liveSession.cwd = input.cwd;
       liveSession.worktreePath = nextWorktreePath;
       liveSession.runtimeEnv = nextRuntimeEnv;
+      liveSession.launchCommand = nextLaunchCommand;
+      liveSession.launchArgs = nextLaunchArgs;
       liveSession.history.clear();
       liveSession.pendingHistoryControlSequence = "";
       liveSession.pendingProcessEvents = [];
@@ -2604,6 +2663,8 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
     } else if (liveSession.status === "exited" || liveSession.status === "error") {
       liveSession.runtimeEnv = nextRuntimeEnv;
       liveSession.worktreePath = nextWorktreePath;
+      liveSession.launchCommand = nextLaunchCommand;
+      liveSession.launchArgs = nextLaunchArgs;
       liveSession.history.clear();
       liveSession.pendingHistoryControlSequence = "";
       liveSession.pendingProcessEvents = [];
@@ -2643,6 +2704,20 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
     withThreadLock(
       input.threadId,
       resolveLaunchInputEnvironment(input).pipe(Effect.flatMap(openLocked)),
+    );
+
+  const openAgentSession: TerminalManager["Service"]["openAgentSession"] = (input, launch) =>
+    withThreadLock(
+      input.threadId,
+      resolveLaunchInputEnvironment(input).pipe(
+        Effect.flatMap((resolved) =>
+          openLocked({
+            ...resolved,
+            command: launch.command,
+            args: [...launch.args],
+          }),
+        ),
+      ),
     );
 
   const openOrAttachForStream = (input: TerminalAttachInput) =>
@@ -2966,6 +3041,8 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
           hasRunningSubprocess: false,
           childCommandLabel: null,
           runtimeEnv: normalizedRuntimeEnv(input.env),
+          launchCommand: input.command ?? null,
+          launchArgs: input.args && input.args.length > 0 ? [...input.args] : null,
         };
         const createdSession = session;
         yield* modifyManagerState((state) => {
@@ -2980,6 +3057,13 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
         session.cwd = input.cwd;
         session.worktreePath = input.worktreePath ?? null;
         session.runtimeEnv = normalizedRuntimeEnv(input.env);
+        session.launchCommand = input.command ?? session.launchCommand;
+        session.launchArgs =
+          input.args !== undefined
+            ? input.args.length > 0
+              ? [...input.args]
+              : null
+            : session.launchArgs;
       }
 
       const cols = input.cols ?? session.cols;
@@ -3037,6 +3121,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
 
   return TerminalManager.of({
     open,
+    openAgentSession,
     attachStream,
     write,
     resize,
