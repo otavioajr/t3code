@@ -81,6 +81,8 @@ tool, which refuses skills reserved for manual invocation.
 Manage Claude plugins in **Settings → Plugins**, for the Claude instance picked at the top of the
 page. Add a marketplace by pasting its GitHub link or `owner/repo`, then install the plugins it
 offers. A plugin's switch turns it on or off, and **Uninstall** removes it from Claude.
+With both Claude and Codex set up, **All providers** adds a marketplace to each of them at
+once.
 
 Claude Code adds its official marketplace itself, so its plugins are listed only once you install
 them. The page lists plugins, not the skills they bring.

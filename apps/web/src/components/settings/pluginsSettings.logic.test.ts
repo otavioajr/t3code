@@ -1,6 +1,7 @@
 import {
   AuthProvidersManageScope,
   EnvironmentAuthorizationError,
+  ProviderDriverKind,
   ProviderInstanceId,
   ProviderPluginsError,
   type ProviderPluginsSnapshot,
@@ -89,6 +90,7 @@ describe("describePluginsFailure", () => {
 
 describe("describePluginsReadiness", () => {
   const ready = {
+    driver: ProviderDriverKind.make("claudeAgent"),
     enabled: true,
     installed: true,
     status: "ready",
@@ -113,10 +115,22 @@ describe("describePluginsReadiness", () => {
   it("notes a signed-out or failing Claude without blocking its plugin commands", () => {
     expect(
       describePluginsReadiness({ ...ready, auth: { status: "unauthenticated" } }),
-    ).toMatchObject({ heading: "Check Claude", blocksChanges: false });
+    ).toMatchObject({ heading: "Check Claude Code", blocksChanges: false });
     expect(
       describePluginsReadiness({ ...ready, status: "error", message: "Claude 1.0 is too old." }),
     ).toMatchObject({ message: "Claude 1.0 is too old.", blocksChanges: false });
+  });
+
+  it("names the provider the instance runs", () => {
+    expect(
+      describePluginsReadiness({
+        ...ready,
+        driver: ProviderDriverKind.make("codex"),
+        enabled: false,
+      }),
+    ).toMatchObject({
+      message: "This Codex instance is turned off. Turn it on in Providers to manage its plugins.",
+    });
   });
 });
 
@@ -135,6 +149,19 @@ describe("pluginActionTarget", () => {
 });
 
 describe("groupPluginsByMarketplace", () => {
+  it("puts built-in marketplaces after the ones the user added", () => {
+    const snapshot: ProviderPluginsSnapshot = {
+      marketplaces: [{ name: "openai-bundled", builtIn: true }, { name: "team" }],
+      plugins: [],
+    };
+    expect(groupPluginsByMarketplace(snapshot).map((group) => [group.name, group.builtIn])).toEqual(
+      [
+        ["team", false],
+        ["openai-bundled", true],
+      ],
+    );
+  });
+
   it("keeps added marketplaces in order, installed plugins first, and sets apart removed ones", () => {
     const snapshot: ProviderPluginsSnapshot = {
       marketplaces: [{ name: "team", source: "acme/plugins" }, { name: "empty" }],

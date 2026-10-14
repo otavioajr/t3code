@@ -175,14 +175,23 @@ export interface PluginsReadinessView {
   readonly blocksChanges: boolean;
 }
 
-/** Why the Claude instance cannot manage plugins right now, or null when it can. */
+/** The provider's own name, for copy that tells the user where to look. */
+export function pluginsProviderLabel(driver: string): string {
+  return driver === "codex" ? "Codex" : "Claude Code";
+}
+
+/** Why the provider instance cannot manage plugins right now, or null when it can. */
 export function describePluginsReadiness(
-  instance: Pick<ServerProvider, "enabled" | "installed" | "status" | "auth" | "message">,
+  instance: Pick<
+    ServerProvider,
+    "driver" | "enabled" | "installed" | "status" | "auth" | "message"
+  >,
 ): PluginsReadinessView | null {
+  const label = pluginsProviderLabel(instance.driver);
   if (!instance.enabled) {
     return {
       heading: "Plugins unavailable",
-      message: "This Claude instance is turned off. Turn it on in Providers to manage its plugins.",
+      message: `This ${label} instance is turned off. Turn it on in Providers to manage its plugins.`,
       tone: "info",
       blocksChanges: true,
     };
@@ -190,23 +199,23 @@ export function describePluginsReadiness(
   if (!instance.installed) {
     return {
       heading: "Plugins unavailable",
-      message: "Claude Code is not installed on this environment. Install it in Providers first.",
+      message: `${label} is not installed on this environment. Install it in Providers first.`,
       tone: "warning",
       blocksChanges: true,
     };
   }
   if (instance.status === "error") {
     return {
-      heading: "Check Claude",
-      message: instance.message ?? "Claude Code reported a problem. Check it in Providers.",
+      heading: `Check ${label}`,
+      message: instance.message ?? `${label} reported a problem. Check it in Providers.`,
       tone: "warning",
       blocksChanges: false,
     };
   }
   if (instance.auth.status === "unauthenticated") {
     return {
-      heading: "Check Claude",
-      message: "Claude Code is not signed in. If plugin commands fail, sign in on Providers.",
+      heading: `Check ${label}`,
+      message: `${label} is not signed in. If plugin commands fail, sign in on Providers.`,
       tone: "info",
       blocksChanges: false,
     };
@@ -219,11 +228,14 @@ export interface PluginMarketplaceGroup {
   readonly source: string | null;
   /** False when installed plugins still come from a marketplace the user has removed. */
   readonly added: boolean;
+  /** Shipped with the provider: listed for its installed plugins, never updated or removed. */
+  readonly builtIn: boolean;
   readonly plugins: ReadonlyArray<ProviderPlugin>;
 }
 
 /**
- * Added marketplaces in snapshot order, then any plugin origins that are no longer added.
+ * Added marketplaces in snapshot order, user-added before built-in, then any plugin origins
+ * that are no longer added.
  * Installed plugins lead each marketplace, ahead of the ones that are only available.
  */
 export function groupPluginsByMarketplace(
@@ -238,18 +250,22 @@ export function groupPluginsByMarketplace(
   const installedFirst = (plugins: ReadonlyArray<ProviderPlugin> | undefined) =>
     (plugins ?? []).toSorted((left, right) => Number(right.installed) - Number(left.installed));
   const addedNames = new Set(snapshot.marketplaces.map((marketplace) => marketplace.name));
-  const added = snapshot.marketplaces.map((marketplace): PluginMarketplaceGroup => ({
-    name: marketplace.name,
-    source: marketplace.source ?? null,
-    added: true,
-    plugins: installedFirst(pluginsByMarketplace.get(marketplace.name)),
-  }));
+  const added = snapshot.marketplaces
+    .map((marketplace): PluginMarketplaceGroup => ({
+      name: marketplace.name,
+      source: marketplace.source ?? null,
+      added: true,
+      builtIn: marketplace.builtIn === true,
+      plugins: installedFirst(pluginsByMarketplace.get(marketplace.name)),
+    }))
+    .toSorted((left, right) => Number(left.builtIn) - Number(right.builtIn));
   const leftovers = [...pluginsByMarketplace]
     .filter(([name]) => !addedNames.has(name))
     .map(([name, plugins]): PluginMarketplaceGroup => ({
       name,
       source: null,
       added: false,
+      builtIn: false,
       plugins: installedFirst(plugins),
     }));
   return [...added, ...leftovers];

@@ -23,6 +23,7 @@ import {
   classifyPluginCommandFailure,
   makeProviderPlugins,
   normalizeMarketplaceSource,
+  fromCodexPlugins,
   representativeInstalls,
 } from "./ProviderPlugins.ts";
 
@@ -191,9 +192,52 @@ describe("buildPluginsSnapshot", () => {
         },
       ],
     });
-    expect(withInstalled.marketplaces).toEqual([{ name: "claude-plugins-official" }]);
+    expect(withInstalled.marketplaces).toEqual([
+      { name: "claude-plugins-official", builtIn: true },
+    ]);
     expect(withInstalled.plugins.map((plugin) => plugin.id)).toEqual([
       "figma@claude-plugins-official",
+    ]);
+  });
+});
+
+describe("Codex plugin data", () => {
+  it("reads Codex's `Error:` summary line", () => {
+    expect(
+      classifyPluginCommandFailure(
+        "",
+        "Error: plugin `nope` was not found in marketplace `team`",
+        1,
+      ),
+    ).toEqual({ reason: "not_found", detail: "plugin `nope` was not found in marketplace `team`" });
+  });
+
+  it("lists built-in sources Codex installs from but does not report as marketplaces", () => {
+    const snapshot = buildPluginsSnapshot({
+      marketplaces: [{ name: "openai-curated" }, { name: "team", source: "https://x/team.git" }],
+      ...fromCodexPlugins({
+        installed: [
+          {
+            pluginId: "github@openai-curated-remote",
+            name: "github",
+            marketplaceName: "openai-curated-remote",
+            enabled: true,
+          },
+        ],
+        available: [
+          { pluginId: "figma@openai-curated", name: "figma", marketplaceName: "openai-curated" },
+          { pluginId: "lint@team", name: "lint", marketplaceName: "team", version: null },
+        ],
+      }),
+      isBuiltInMarketplace: (name) => name.startsWith("openai-"),
+    });
+    expect(snapshot.marketplaces).toEqual([
+      { name: "team", source: "https://x/team.git" },
+      { name: "openai-curated-remote", builtIn: true },
+    ]);
+    expect(snapshot.plugins.map((plugin) => [plugin.id, plugin.installed])).toEqual([
+      ["github@openai-curated-remote", true],
+      ["lint@team", false],
     ]);
   });
 });
@@ -582,6 +626,96 @@ describe("ProviderPlugins service", () => {
         reason: "command_failed",
         detail: "The plugin command did not finish in time. Check your connection, then try again.",
       });
+    }),
+  );
+});
+
+const codexInstanceId = ProviderInstanceId.make("codex");
+const codexInstance = {
+  instanceId: codexInstanceId,
+  driverKind: ProviderDriverKind.make("codex"),
+} as ProviderInstance;
+
+/** A fake `codex plugin` that answers lists and records every command with its CODEX_HOME. */
+const codexSpawner = (
+  recorded: Ref.Ref<ReadonlyArray<{ args: ReadonlyArray<string>; home: string | undefined }>>,
+) =>
+  ChildProcessSpawner.make((command) =>
+    Effect.gen(function* () {
+      const standard = command._tag === "StandardCommand" ? command : undefined;
+      const args = standard?.args ?? [];
+      yield* Ref.update(recorded, (all) => [
+        ...all,
+        { args, home: standard?.options.env?.CODEX_HOME },
+      ]);
+      const stdout =
+        args[1] === "marketplace" && args[2] === "list"
+          ? JSON.stringify({
+              marketplaces: [{ name: "team", marketplaceSource: { source: "acme/plugins" } }],
+            })
+          : args[1] === "list"
+            ? JSON.stringify({
+                installed: [
+                  { pluginId: "lint@team", name: "lint", marketplaceName: "team", enabled: true },
+                ],
+                available: [],
+              })
+            : "";
+      return ChildProcessSpawner.makeHandle({
+        pid: ChildProcessSpawner.ProcessId(1),
+        exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(0)),
+        isRunning: Effect.succeed(false),
+        kill: () => Effect.void,
+        unref: Effect.succeed(Effect.void),
+        stdin: Sink.drain,
+        stdout: Stream.encodeText(Stream.make(stdout)),
+        stderr: Stream.empty,
+        all: Stream.empty,
+        getInputFd: () => Sink.drain,
+        getOutputFd: () => Stream.empty,
+      });
+    }),
+  );
+
+describe("ProviderPlugins service for Codex", () => {
+  effectIt.effect("maps panel actions to Codex's verbs in its shared home", () =>
+    Effect.gen(function* () {
+      const recorded = yield* Ref.make<
+        ReadonlyArray<{ args: ReadonlyArray<string>; home: string | undefined }>
+      >([]);
+      const layer = Layer.mergeAll(
+        Layer.mock(ProviderInstanceRegistry.ProviderInstanceRegistry)({
+          getInstance: () => Effect.succeed(codexInstance),
+        }),
+        Layer.mock(ProviderRegistry.ProviderRegistry)({
+          refreshInstance: () => Effect.succeed([]),
+        }),
+        ServerSettings.layerTest(),
+        Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, codexSpawner(recorded)),
+      ).pipe(Layer.provideMerge(Layer.mergeAll(NodeFileSystem.layer, NodePath.layer)));
+
+      const snapshot = yield* Effect.gen(function* () {
+        const plugins = yield* makeProviderPlugins(yield* Semaphore.make(1));
+        yield* plugins.install({ instanceId: codexInstanceId, pluginId: "format@team" });
+        yield* plugins.uninstall({ instanceId: codexInstanceId, pluginId: "lint@team" });
+        yield* plugins.updateMarketplace({ instanceId: codexInstanceId, marketplace: "team" });
+        return yield* plugins.list({ instanceId: codexInstanceId });
+      }).pipe(Effect.provide(layer));
+
+      const commands = yield* Ref.get(recorded);
+      const writes = commands
+        .map((command) => command.args.slice(1))
+        .filter((args) => args[0] !== "list" && !(args[0] === "marketplace" && args[1] === "list"));
+      expect(writes).toEqual([
+        ["add", "format@team"],
+        ["remove", "lint@team"],
+        ["marketplace", "upgrade", "team"],
+      ]);
+      expect(commands.every((command) => command.home?.endsWith(".codex") === true)).toBe(true);
+      expect(snapshot.marketplaces).toEqual([{ name: "team", source: "acme/plugins" }]);
+      expect(snapshot.plugins.map((plugin) => [plugin.id, plugin.enabled])).toEqual([
+        ["lint@team", true],
+      ]);
     }),
   );
 });

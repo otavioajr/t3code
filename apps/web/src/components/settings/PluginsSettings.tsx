@@ -1,7 +1,15 @@
 import { useAtomValue } from "@effect/atom-react";
 import { useNavigate } from "@tanstack/react-router";
 import { InfoIcon, LockIcon, PlugIcon, PlusIcon, TriangleAlertIcon } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+  type ReactNode,
+} from "react";
 import {
   ProviderDriverKind,
   type EnvironmentId,
@@ -38,13 +46,18 @@ import {
   pluginActionTarget,
   pluginCountLabel,
   pluginTarget,
+  pluginsProviderLabel,
   vanishedPluginTargets,
   type PluginAction,
   type PluginMarketplaceGroup,
   type PluginsFailureView,
 } from "./pluginsSettings.logic";
 
-const CLAUDE_DRIVER = ProviderDriverKind.make("claudeAgent");
+/** Providers whose plugin systems the page manages. */
+const PLUGIN_DRIVERS = new Set<string>([
+  ProviderDriverKind.make("claudeAgent"),
+  ProviderDriverKind.make("codex"),
+]);
 
 interface PluginActionError {
   readonly action: PluginAction;
@@ -53,25 +66,34 @@ interface PluginActionError {
 
 type PluginActionErrors = ReadonlyMap<string, PluginActionError>;
 
+const ALL_PROVIDERS = "all";
+
+/** One provider instance, or every one at once. */
+type PluginsSelection = ProviderInstanceId | typeof ALL_PROVIDERS;
+
 /**
- * Plugins are installed into a Claude instance on one environment, so the page
- * manages that environment's Claude instances. Only marketplaces the user added
- * are listed; there is no catalog to browse.
+ * Plugins are installed into a Claude or Codex instance on one environment, so the
+ * page manages that environment's instances of those providers. Only marketplaces
+ * the user added are browsable; there is no catalog.
  */
 export function PluginsSettings({ environmentId }: { readonly environmentId: EnvironmentId }) {
   const serverProviders = useAtomValue(serverEnvironment.providersValueAtom(environmentId));
-  const claudeInstances = useMemo(
+  const pluginInstances = useMemo(
     () =>
-      (serverProviders ?? EMPTY_SERVER_PROVIDERS).filter(
-        (provider) => provider.driver === CLAUDE_DRIVER,
+      (serverProviders ?? EMPTY_SERVER_PROVIDERS).filter((provider) =>
+        PLUGIN_DRIVERS.has(provider.driver),
       ),
     [serverProviders],
   );
-  const [selectedInstanceId, setSelectedInstanceId] = useState<ProviderInstanceId | null>(null);
+  // With more than one provider the page opens on All, which manages every one at once.
+  const [selection, setSelection] = useState<PluginsSelection | null>(null);
+  const showAll = pluginInstances.length > 1 && (selection ?? ALL_PROVIDERS) === ALL_PROVIDERS;
   const instance =
-    claudeInstances.find((provider) => provider.instanceId === selectedInstanceId) ??
-    claudeInstances[0] ??
+    pluginInstances.find((provider) => provider.instanceId === selection) ??
+    pluginInstances[0] ??
     null;
+  // Bumped after an add to all providers, so every provider's list reloads.
+  const [reloadSignal, setReloadSignal] = useState(0);
 
   if (serverProviders === null) {
     return (
@@ -91,13 +113,46 @@ export function PluginsSettings({ environmentId }: { readonly environmentId: Env
             <EmptyMedia variant="icon">
               <PlugIcon />
             </EmptyMedia>
-            <EmptyTitle>No Claude provider instance</EmptyTitle>
+            <EmptyTitle>No Claude or Codex instance</EmptyTitle>
             <EmptyDescription>
-              Plugins are managed by Claude Code. Add a Claude instance in Providers to install
+              Plugins are managed by Claude Code and Codex. Add one of them in Providers to install
               plugins on this environment.
             </EmptyDescription>
           </EmptyHeader>
         </Empty>
+      </SettingsPageContainer>
+    );
+  }
+
+  const selector =
+    pluginInstances.length > 1 ? (
+      <InstanceSelect
+        selection={showAll ? ALL_PROVIDERS : instance.instanceId}
+        instances={pluginInstances}
+        onSelect={setSelection}
+      />
+    ) : null;
+
+  if (showAll) {
+    return (
+      <SettingsPageContainer>
+        <AddToAllProvidersSection
+          environmentId={environmentId}
+          instances={pluginInstances}
+          selector={selector}
+          onAdded={() => setReloadSignal((signal) => signal + 1)}
+        />
+        {pluginInstances.map((candidate) => (
+          <PluginsInstancePanel
+            key={candidate.instanceId}
+            environmentId={environmentId}
+            instance={candidate}
+            title={instanceLabel(candidate)}
+            headerControl={null}
+            showAddRow={false}
+            reloadSignal={reloadSignal}
+          />
+        ))}
       </SettingsPageContainer>
     );
   }
@@ -109,23 +164,121 @@ export function PluginsSettings({ environmentId }: { readonly environmentId: Env
         key={instance.instanceId}
         environmentId={environmentId}
         instance={instance}
-        instances={claudeInstances}
-        onSelectInstance={setSelectedInstanceId}
+        title="Marketplaces"
+        headerControl={selector}
+        showAddRow
+        reloadSignal={reloadSignal}
       />
     </SettingsPageContainer>
+  );
+}
+
+/**
+ * Adds one marketplace to every provider that can take it. Each provider clones the
+ * repository on its own, so one can fail while the others succeed; failures are listed
+ * per provider and a retry repeats the add only where it failed.
+ */
+function AddToAllProvidersSection({
+  environmentId,
+  instances,
+  selector,
+  onAdded,
+}: {
+  readonly environmentId: EnvironmentId;
+  readonly instances: ReadonlyArray<ServerProvider>;
+  readonly selector: ReactNode;
+  readonly onAdded: () => void;
+}) {
+  const canManage = useAtomValue(
+    serverEnvironment.addProviderPluginMarketplace.permissionAtom(environmentId),
+  );
+  const addMarketplace = useAtomCommand(serverEnvironment.addProviderPluginMarketplace, {
+    reportFailure: false,
+  });
+  const [pending, setPending] = useState(false);
+  const [failures, setFailures] = useState<
+    ReadonlyArray<{ readonly instance: ServerProvider; readonly view: PluginsFailureView }>
+  >([]);
+  const [lastSource, setLastSource] = useState<string | null>(null);
+  const ready = instances.filter(
+    (candidate) => describePluginsReadiness(candidate)?.blocksChanges !== true,
+  );
+
+  const addTo = async (targets: ReadonlyArray<ServerProvider>, source: string) => {
+    setPending(true);
+    setLastSource(source);
+    const results = await Promise.all(
+      targets.map(async (target) => ({
+        instance: target,
+        result: await addMarketplace({
+          environmentId,
+          input: { instanceId: target.instanceId, source },
+        }),
+      })),
+    );
+    setPending(false);
+    const failed = results.flatMap(({ instance, result }) =>
+      result._tag === "Failure" && !isAtomCommandInterrupted(result)
+        ? [
+            {
+              instance,
+              view: describePluginsFailure("add-marketplace", squashAtomCommandFailure(result)),
+            },
+          ]
+        : [],
+    );
+    setFailures(failed);
+    if (failed.length < results.length) onAdded();
+    return failed.length === 0;
+  };
+
+  const skipped = instances.length - ready.length;
+  return (
+    <SettingsSection title="All providers" headerAction={selector}>
+      <AddMarketplaceRow
+        description={`Adds the repository to ${ready.map(instanceLabel).join(" and ")} at once.${
+          skipped > 0 ? " Providers that are off or not installed are skipped." : ""
+        }`}
+        canChange={canManage && ready.length > 0}
+        pending={pending}
+        onSubmit={(source) => addTo(ready, source)}
+      >
+        {failures.map((failure) => (
+          <div key={failure.instance.instanceId} className="pb-2">
+            <PluginsFailureAlert
+              view={{
+                ...failure.view,
+                heading: `${instanceLabel(failure.instance)}: ${failure.view.heading}`,
+              }}
+              retrying={pending}
+              onRetry={() => {
+                if (lastSource !== null) void addTo([failure.instance], lastSource);
+              }}
+            />
+          </div>
+        ))}
+      </AddMarketplaceRow>
+    </SettingsSection>
   );
 }
 
 function PluginsInstancePanel({
   environmentId,
   instance,
-  instances,
-  onSelectInstance,
+  title,
+  headerControl,
+  showAddRow,
+  reloadSignal,
 }: {
   readonly environmentId: EnvironmentId;
   readonly instance: ServerProvider;
-  readonly instances: ReadonlyArray<ServerProvider>;
-  readonly onSelectInstance: (instanceId: ProviderInstanceId) => void;
+  readonly title: string;
+  /** The provider picker, when the page shows one provider at a time. */
+  readonly headerControl: ReactNode;
+  /** False under All, where one shared row adds to every provider. */
+  readonly showAddRow: boolean;
+  /** Each change reloads the list, after a marketplace was added from outside the panel. */
+  readonly reloadSignal: number;
 }) {
   const instanceId = instance.instanceId;
   const navigate = useNavigate();
@@ -192,6 +345,9 @@ function PluginsInstancePanel({
     void requestPlugins();
   }, [requestPlugins]);
 
+  // A marketplace added from the All row changed this provider's list outside the panel.
+  const lastReloadSignalRef = useRef(reloadSignal);
+
   const refreshPlugins = useCallback(async () => {
     if (loadingRef.current) return;
     loadingRef.current = true;
@@ -200,6 +356,12 @@ function PluginsInstancePanel({
     loadingRef.current = false;
     setLoading(false);
   }, [requestPlugins]);
+
+  useEffect(() => {
+    if (lastReloadSignalRef.current === reloadSignal) return;
+    lastReloadSignalRef.current = reloadSignal;
+    void refreshPlugins();
+  }, [refreshPlugins, reloadSignal]);
 
   const dispatch = useCallback(
     (action: PluginAction): Promise<AtomCommandResult<ProviderPluginsSnapshot, unknown>> => {
@@ -296,12 +458,10 @@ function PluginsInstancePanel({
 
   return (
     <SettingsSection
-      title="Marketplaces"
+      title={title}
       headerAction={
         <div className="flex items-center gap-2">
-          {instances.length > 1 ? (
-            <InstanceSelect instance={instance} instances={instances} onSelect={onSelectInstance} />
-          ) : null}
+          {headerControl}
           <Button
             size="xs"
             variant="outline"
@@ -359,15 +519,24 @@ function PluginsInstancePanel({
         </div>
       ) : null}
 
-      <AddMarketplaceRow
-        canChange={canChange}
-        pending={addPending}
-        error={addError?.view}
-        onSubmit={submitMarketplace}
-        onRetry={() => {
-          if (addError) void runAction(addError.action);
-        }}
-      />
+      {showAddRow ? (
+        <AddMarketplaceRow
+          description="A GitHub repository, as owner/repo or its link. Its plugins are listed once added."
+          canChange={canChange}
+          pending={addPending}
+          onSubmit={submitMarketplace}
+        >
+          {addError ? (
+            <div className="pb-2">
+              <PluginsFailureAlert
+                view={addError.view}
+                retrying={addPending}
+                onRetry={() => void runAction(addError.action)}
+              />
+            </div>
+          ) : null}
+        </AddMarketplaceRow>
+      ) : null}
 
       {snapshot === null && loadFailure === null ? (
         <div className="flex items-center gap-2 px-3 py-4 text-sm text-muted-foreground sm:px-4">
@@ -399,17 +568,18 @@ function PluginsInstancePanel({
  * every marketplace and plugin row beneath it.
  */
 function AddMarketplaceRow({
+  description,
   canChange,
   pending,
-  error,
   onSubmit,
-  onRetry,
+  children,
 }: {
+  readonly description: string;
   readonly canChange: boolean;
   readonly pending: boolean;
-  readonly error: PluginsFailureView | undefined;
   readonly onSubmit: (source: string) => Promise<boolean>;
-  readonly onRetry: () => void;
+  /** Failures of the last add, shown under the row. */
+  readonly children?: ReactNode;
 }) {
   const [draft, setDraft] = useState("");
   const submit = (event: FormEvent<HTMLFormElement>) => {
@@ -423,7 +593,7 @@ function AddMarketplaceRow({
   return (
     <SettingsRow
       title="Add marketplace"
-      description="A GitHub repository, as owner/repo or its link. Its plugins are listed once added."
+      description={description}
       control={
         <form
           className="flex w-full items-center gap-2 @min-[32rem]/settings-row:w-auto"
@@ -457,11 +627,7 @@ function AddMarketplaceRow({
         </form>
       }
     >
-      {error ? (
-        <div className="pb-2">
-          <PluginsFailureAlert view={error} retrying={pending} onRetry={onRetry} />
-        </div>
-      ) : null}
+      {children}
     </SettingsRow>
   );
 }
@@ -491,12 +657,14 @@ function MarketplaceBlock({
         <div className="min-w-0">
           <p className="truncate text-sm font-medium text-foreground">{group.name}</p>
           <p className="truncate text-xs text-muted-foreground">
-            {group.source ?? (group.added ? "Source not reported" : "No longer added")}
+            {group.builtIn
+              ? "Built in"
+              : (group.source ?? (group.added ? "Source not reported" : "No longer added"))}
             {" · "}
             {pluginCountLabel(group.plugins.length)}
           </p>
         </div>
-        {group.added ? (
+        {group.added && !group.builtIn ? (
           <div className="flex shrink-0 items-center gap-1">
             {busy ? <Spinner size="sm" tone="muted" /> : null}
             <Button
@@ -617,7 +785,7 @@ function PluginRow({
                 onClick={() =>
                   onConfirmedAction(
                     { kind: "uninstall-plugin", pluginId: plugin.id },
-                    `Uninstall "${plugin.name}" from Claude?`,
+                    `Uninstall "${plugin.name}"?`,
                   )
                 }
               >
@@ -676,26 +844,29 @@ function PluginsFailureAlert({
 }
 
 function InstanceSelect({
-  instance,
+  selection,
   instances,
   onSelect,
 }: {
-  readonly instance: ServerProvider;
+  readonly selection: PluginsSelection;
   readonly instances: ReadonlyArray<ServerProvider>;
-  readonly onSelect: (instanceId: ProviderInstanceId) => void;
+  readonly onSelect: (selection: PluginsSelection) => void;
 }) {
+  const selected = instances.find((candidate) => candidate.instanceId === selection);
   return (
-    <Select
-      value={instance.instanceId}
+    <Select<string>
+      value={selection}
       onValueChange={(value) => {
+        if (value === ALL_PROVIDERS) return onSelect(ALL_PROVIDERS);
         const next = instances.find((candidate) => candidate.instanceId === value);
         if (next) onSelect(next.instanceId);
       }}
     >
-      <SelectTrigger aria-label="Claude instance" size="sm">
-        <SelectValue>{instanceLabel(instance)}</SelectValue>
+      <SelectTrigger aria-label="Provider" size="sm">
+        <SelectValue>{selected ? instanceLabel(selected) : "All providers"}</SelectValue>
       </SelectTrigger>
       <SelectPopup>
+        <SelectItem value={ALL_PROVIDERS}>All providers</SelectItem>
         {instances.map((candidate) => (
           <SelectItem key={candidate.instanceId} value={candidate.instanceId}>
             {instanceLabel(candidate)}
@@ -707,7 +878,7 @@ function InstanceSelect({
 }
 
 function instanceLabel(provider: ServerProvider): string {
-  return provider.displayName ?? provider.instanceId;
+  return provider.displayName ?? pluginsProviderLabel(provider.driver);
 }
 
 function withoutTargets(

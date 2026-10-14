@@ -17,6 +17,8 @@ export const ProviderPluginMarketplace = Schema.Struct({
   name: PluginText,
   /** Where the marketplace comes from, for display: `owner/repo`, a URL, or a path. */
   source: Schema.optional(Schema.String.check(Schema.isMaxLength(2_048))),
+  /** Shipped with the provider rather than added by the user: it cannot be updated or removed. */
+  builtIn: Schema.optional(Schema.Boolean),
 });
 export type ProviderPluginMarketplace = typeof ProviderPluginMarketplace.Type;
 
