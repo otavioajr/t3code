@@ -8,6 +8,7 @@ import {
   FolderIcon,
   FolderOpenIcon,
   FolderPlusIcon,
+  PlugIcon,
   Globe2Icon,
   SearchIcon,
   SquarePenIcon,
@@ -3136,7 +3137,7 @@ function SidebarNavLinkButton({
   icon,
   children,
 }: {
-  readonly to: "/settings/scheduled-tasks";
+  readonly to: "/settings/scheduled-tasks" | "/settings/plugins";
   readonly icon: React.ReactNode;
   readonly children: React.ReactNode;
 }) {
@@ -3239,6 +3240,11 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
             <SidebarMenuItem>
               <SidebarNavLinkButton to="/settings/scheduled-tasks" icon={<CalendarClockIcon />}>
                 Automations
+              </SidebarNavLinkButton>
+            </SidebarMenuItem>
+            <SidebarMenuItem>
+              <SidebarNavLinkButton to="/settings/plugins" icon={<PlugIcon />}>
+                Customize
               </SidebarNavLinkButton>
             </SidebarMenuItem>
           </SidebarMenu>
