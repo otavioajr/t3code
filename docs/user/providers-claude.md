@@ -76,6 +76,18 @@ can still be started by you. Invoke those one per message: Claude directly runs
 only the last named skill and may try to start earlier ones through its Skill
 tool, which refuses skills reserved for manual invocation.
 
+## Plugins
+
+Manage Claude plugins in **Settings → Plugins**, for the Claude instance picked at the top of the
+page. Add a marketplace by pasting its GitHub link or `owner/repo`, then install the plugins it
+offers. A plugin's switch turns it on or off, and **Uninstall** removes it from Claude.
+
+Claude Code adds its official marketplace itself, so its plugins are listed only once you install
+them. The page lists plugins, not the skills they bring.
+
+After a change, use **Restart agent session** in the command palette so the conversation picks it
+up. See [composer](./composer.md) for details.
+
 ## OpenRouter
 
 Create a Claude instance with its own config directory, such as

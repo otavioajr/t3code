@@ -1067,6 +1067,73 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:provider:install-remove",
       tag: WS_METHODS.providerInstallRemove,
     }),
+    listProviderPlugins: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:provider:plugins-list",
+      tag: WS_METHODS.providerPluginsList,
+      // `latest` starts each queued list after the running one, so a refresh never joins a
+      // list that began before a change it is meant to show.
+      concurrency: {
+        mode: "latest",
+        key: ({ environmentId, input }) => JSON.stringify([environmentId, input.instanceId]),
+      },
+    }),
+    // Plugin commands run the provider CLI, which can take as long as a git clone,
+    // so they stay off the config lane that settings writes share.
+    addProviderPluginMarketplace: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:provider:plugins-add-marketplace",
+      tag: WS_METHODS.providerPluginsAddMarketplace,
+      concurrency: {
+        mode: "singleFlight",
+        // The source is free-form user text, so a delimiter could collide.
+        key: ({ environmentId, input }) =>
+          JSON.stringify([environmentId, input.instanceId, input.source]),
+      },
+    }),
+    removeProviderPluginMarketplace: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:provider:plugins-remove-marketplace",
+      tag: WS_METHODS.providerPluginsRemoveMarketplace,
+      concurrency: {
+        mode: "singleFlight",
+        key: ({ environmentId, input }) =>
+          JSON.stringify([environmentId, input.instanceId, input.marketplace]),
+      },
+    }),
+    updateProviderPluginMarketplace: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:provider:plugins-update-marketplace",
+      tag: WS_METHODS.providerPluginsUpdateMarketplace,
+      concurrency: {
+        mode: "singleFlight",
+        key: ({ environmentId, input }) =>
+          JSON.stringify([environmentId, input.instanceId, input.marketplace]),
+      },
+    }),
+    installProviderPlugin: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:provider:plugins-install",
+      tag: WS_METHODS.providerPluginsInstall,
+      concurrency: {
+        mode: "singleFlight",
+        key: ({ environmentId, input }) =>
+          JSON.stringify([environmentId, input.instanceId, input.pluginId]),
+      },
+    }),
+    uninstallProviderPlugin: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:provider:plugins-uninstall",
+      tag: WS_METHODS.providerPluginsUninstall,
+      concurrency: {
+        mode: "singleFlight",
+        key: ({ environmentId, input }) =>
+          JSON.stringify([environmentId, input.instanceId, input.pluginId]),
+      },
+    }),
+    setProviderPluginEnabled: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:provider:plugins-set-enabled",
+      tag: WS_METHODS.providerPluginsSetEnabled,
+      concurrency: {
+        mode: "singleFlight",
+        key: ({ environmentId, input }) =>
+          JSON.stringify([environmentId, input.instanceId, input.pluginId]),
+      },
+    }),
     traceDiagnostics: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:server:trace-diagnostics",
       tag: WS_METHODS.serverGetTraceDiagnostics,
