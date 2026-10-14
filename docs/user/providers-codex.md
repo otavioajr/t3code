@@ -25,6 +25,18 @@ T3 Code can use your installed Codex and its existing login. Run `codex login`
 on the environment's machine to sign in. [Provider setup](./install.md#providers)
 covers installation and custom configuration.
 
+## Plugins
+
+Manage Codex plugins in **Settings → Plugins** by picking the Codex instance at the top of the
+page. Add a marketplace by pasting its GitHub link or `owner/repo`, then install the plugins it
+offers. A plugin's switch turns it on or off, and **Uninstall** removes it from Codex.
+With more than one of Claude, Codex, and Grok set up, **All providers** adds a marketplace to
+each of them at once.
+
+Plugins that ship with Codex are listed under built-in marketplaces, which you can switch on or
+off but not update or remove. Plugins are not available yet for instances connected with ChatGPT
+through T3 Code; use an instance with your existing Codex login.
+
 ## Use multiple accounts
 
 Add another ChatGPT account in **Settings → Providers**, then select the account

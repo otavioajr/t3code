@@ -39,6 +39,15 @@ import {
   ProviderSetupError,
   ProviderSetupInput,
 } from "./providerSetup.ts";
+import {
+  ProviderPluginInput,
+  ProviderPluginsAddMarketplaceInput,
+  ProviderPluginsError,
+  ProviderPluginsInput,
+  ProviderPluginsMarketplaceInput,
+  ProviderPluginSetEnabledInput,
+  ProviderPluginsSnapshot,
+} from "./providerPlugins.ts";
 
 import {
   AcpRegistryAcceptUrlAuthInput,
@@ -419,6 +428,13 @@ export const WS_METHODS = {
   providerInstallCancel: "provider.install.cancel",
   providerInstallSubscribe: "provider.install.subscribe",
   providerInstallRemove: "provider.install.remove",
+  providerPluginsList: "provider.plugins.list",
+  providerPluginsAddMarketplace: "provider.plugins.addMarketplace",
+  providerPluginsRemoveMarketplace: "provider.plugins.removeMarketplace",
+  providerPluginsUpdateMarketplace: "provider.plugins.updateMarketplace",
+  providerPluginsInstall: "provider.plugins.install",
+  providerPluginsUninstall: "provider.plugins.uninstall",
+  providerPluginsSetEnabled: "provider.plugins.setEnabled",
 
   // VCS methods
   vcsPull: "vcs.pull",
@@ -728,6 +744,56 @@ const WsProviderInstallRemoveRpc = Rpc.make(WS_METHODS.providerInstallRemove, {
   payload: ProviderSetupInput,
   success: ProviderInstallState,
   error: ProviderSetupRpcError,
+});
+
+const ProviderPluginsRpcError = Schema.Union([ProviderPluginsError, EnvironmentAuthorizationError]);
+
+const WsProviderPluginsListRpc = Rpc.make(WS_METHODS.providerPluginsList, {
+  payload: ProviderPluginsInput,
+  success: ProviderPluginsSnapshot,
+  error: ProviderPluginsRpcError,
+});
+
+const WsProviderPluginsAddMarketplaceRpc = Rpc.make(WS_METHODS.providerPluginsAddMarketplace, {
+  payload: ProviderPluginsAddMarketplaceInput,
+  success: ProviderPluginsSnapshot,
+  error: ProviderPluginsRpcError,
+});
+
+const WsProviderPluginsRemoveMarketplaceRpc = Rpc.make(
+  WS_METHODS.providerPluginsRemoveMarketplace,
+  {
+    payload: ProviderPluginsMarketplaceInput,
+    success: ProviderPluginsSnapshot,
+    error: ProviderPluginsRpcError,
+  },
+);
+
+const WsProviderPluginsUpdateMarketplaceRpc = Rpc.make(
+  WS_METHODS.providerPluginsUpdateMarketplace,
+  {
+    payload: ProviderPluginsMarketplaceInput,
+    success: ProviderPluginsSnapshot,
+    error: ProviderPluginsRpcError,
+  },
+);
+
+const WsProviderPluginsInstallRpc = Rpc.make(WS_METHODS.providerPluginsInstall, {
+  payload: ProviderPluginInput,
+  success: ProviderPluginsSnapshot,
+  error: ProviderPluginsRpcError,
+});
+
+const WsProviderPluginsUninstallRpc = Rpc.make(WS_METHODS.providerPluginsUninstall, {
+  payload: ProviderPluginInput,
+  success: ProviderPluginsSnapshot,
+  error: ProviderPluginsRpcError,
+});
+
+const WsProviderPluginsSetEnabledRpc = Rpc.make(WS_METHODS.providerPluginsSetEnabled, {
+  payload: ProviderPluginSetEnabledInput,
+  success: ProviderPluginsSnapshot,
+  error: ProviderPluginsRpcError,
 });
 
 const WsServerUpdateServerRpc = Rpc.make(WS_METHODS.serverUpdateServer, {
@@ -1895,6 +1961,13 @@ export const WsRpcGroup = RpcGroup.make(
   WsProviderInstallCancelRpc,
   WsProviderInstallSubscribeRpc,
   WsProviderInstallRemoveRpc,
+  WsProviderPluginsListRpc,
+  WsProviderPluginsAddMarketplaceRpc,
+  WsProviderPluginsRemoveMarketplaceRpc,
+  WsProviderPluginsUpdateMarketplaceRpc,
+  WsProviderPluginsInstallRpc,
+  WsProviderPluginsUninstallRpc,
+  WsProviderPluginsSetEnabledRpc,
   WsServerUpdateServerRpc,
   WsServerUpdateServerWithProgressRpc,
   WsServerCommitDesktopUpdateRpc,

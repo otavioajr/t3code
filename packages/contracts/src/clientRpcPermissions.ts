@@ -2,6 +2,7 @@ import * as Schema from "effect/Schema";
 import { GitPreparePullRequestThreadInput } from "./git.ts";
 import {
   AuthOrchestrationOperateScope,
+  AuthProvidersManageScope,
   AuthSettingsWriteScope,
   AuthSourceControlWriteScope,
   type AuthEnvironmentScope,
@@ -47,6 +48,15 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.scheduledTasksRunNow]: AuthOrchestrationOperateScope,
   [WS_METHODS.scheduledTasksRotateWebhookToken]: AuthOrchestrationOperateScope,
   [ORCHESTRATION_V2_WS_METHODS.stopWorkflow]: AuthOrchestrationOperateScope,
+
+  // Plugin writes change what the provider's agent can run, so they need the
+  // grant that manages providers. Listing is a read and stays unguarded.
+  [WS_METHODS.providerPluginsAddMarketplace]: AuthProvidersManageScope,
+  [WS_METHODS.providerPluginsRemoveMarketplace]: AuthProvidersManageScope,
+  [WS_METHODS.providerPluginsUpdateMarketplace]: AuthProvidersManageScope,
+  [WS_METHODS.providerPluginsInstall]: AuthProvidersManageScope,
+  [WS_METHODS.providerPluginsUninstall]: AuthProvidersManageScope,
+  [WS_METHODS.providerPluginsSetEnabled]: AuthProvidersManageScope,
 } as const;
 export type ClientGuardedRpcTag = keyof typeof CLIENT_GUARDED_RPC_SCOPES;
 
