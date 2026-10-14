@@ -9,6 +9,8 @@
  * reimplementing it, so the agent, the CLI, and T3 Code always agree on what is
  * installed. Codex has no CLI verb for enabling a plugin, so that one change
  * goes through its app-server's config write, which is what the CLI reads.
+ * Grok Build (`grok plugin ...`) also loads the plugins Claude Code installed,
+ * so its state comes from `grok inspect`, which reports what a session loads.
  * Other providers report `unsupported_provider`.
  *
  * @module provider/ProviderPlugins
@@ -29,6 +31,7 @@ import {
   type ProviderPluginSetEnabledInput,
   type ProviderPluginsSnapshot,
 } from "@t3tools/contracts";
+import { GrokSettings } from "@t3tools/provider-grok/settings";
 import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
 import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
 import { spawnAndCollect } from "@t3tools/provider-core/server/snapshotProbe";
@@ -51,9 +54,11 @@ import * as ProviderRegistry from "./ProviderRegistry.ts";
 
 const CLAUDE_DRIVER_KIND = ProviderDriverKind.make("claudeAgent");
 const CODEX_DRIVER_KIND = ProviderDriverKind.make("codex");
+const GROK_DRIVER_KIND = ProviderDriverKind.make("grok");
 
 const decodeClaudeSettings = Schema.decodeUnknownEffect(ClaudeSettings);
 const decodeCodexSettings = Schema.decodeUnknownEffect(CodexSettings);
+const decodeGrokSettings = Schema.decodeUnknownEffect(GrokSettings);
 
 /** One install. Claude lists a plugin once per scope it is installed in; Codex has no scopes. */
 const InstalledPluginEntry = Schema.Struct({
@@ -139,6 +144,60 @@ const CodexMarketplacesJson = Schema.fromJsonString(
 );
 const decodeCodexMarketplaces = Schema.decodeUnknownEffect(CodexMarketplacesJson);
 
+/** `grok plugin list --json [--available]`: installed and available plugins, by name. */
+const GrokListedPlugin = Schema.Struct({
+  status: Schema.String,
+  name: Schema.String,
+  version: Schema.optional(Schema.NullOr(Schema.String)),
+  description: Schema.optional(Schema.NullOr(Schema.String)),
+  marketplace: Schema.optional(Schema.NullOr(Schema.String)),
+});
+type GrokListedPlugin = typeof GrokListedPlugin.Type;
+const decodeGrokListed = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(Schema.Array(GrokListedPlugin)),
+);
+
+/** The part of `grok inspect --json` that says which plugins a session loads. */
+const GrokInspection = Schema.Struct({
+  plugins: Schema.Array(
+    Schema.Struct({
+      name: Schema.String,
+      path: Schema.optional(Schema.String),
+      enabled: Schema.optional(Schema.Boolean),
+      provides: Schema.optional(Schema.Struct({ skills: Schema.optional(Schema.Number) })),
+    }),
+  ),
+  skills: Schema.Array(
+    Schema.Struct({
+      source: Schema.optional(
+        Schema.Struct({
+          type: Schema.optional(Schema.String),
+          plugin_name: Schema.optional(Schema.String),
+        }),
+      ),
+    }),
+  ),
+});
+type GrokInspection = typeof GrokInspection.Type;
+const decodeGrokInspection = Schema.decodeUnknownEffect(Schema.fromJsonString(GrokInspection));
+
+const GrokMarketplacesJson = Schema.fromJsonString(
+  Schema.Array(
+    Schema.Struct({
+      name: Schema.String,
+      source: Schema.optional(
+        Schema.NullOr(
+          Schema.Struct({
+            url: Schema.optional(Schema.NullOr(Schema.String)),
+            path: Schema.optional(Schema.NullOr(Schema.String)),
+          }),
+        ),
+      ),
+    }),
+  ),
+);
+const decodeGrokMarketplaces = Schema.decodeUnknownEffect(GrokMarketplacesJson);
+
 const PluginManifestJson = Schema.fromJsonString(
   Schema.Struct({ description: Schema.optional(Schema.String) }),
 );
@@ -201,7 +260,7 @@ export function classifyPluginCommandFailure(
   // Only git and ssh authentication failures mean "private or missing repository". A
   // local permission error, such as an unwritable config dir, falls through to its summary.
   if (
-    /repository not found|could not read username|authentication failed|access rights|terminal prompts disabled|permission denied \((?:publickey|password|keyboard-interactive)/i.test(
+    /repository not found|repository '[^']*' not found|could not read username|authentication failed|access rights|terminal prompts disabled|permission denied \((?:publickey|password|keyboard-interactive)/i.test(
       output,
     )
   ) {
@@ -261,6 +320,68 @@ export function fromCodexPlugins(input: {
       ...(optional(entry.description) ? { description: optional(entry.description) } : {}),
       ...(optional(entry.version) ? { version: optional(entry.version) } : {}),
     })),
+  };
+}
+
+/** Where Claude Code caches an installed plugin: `.../plugins/cache/<marketplace>/<name>/<version>`. */
+const CLAUDE_PLUGIN_CACHE_PATH =
+  /[\\/]\.claude[\\/]plugins[\\/]cache[\\/]([^\\/]+)[\\/]([^\\/]+)[\\/]([^\\/]+)/;
+
+/** True for a plugin Grok loads out of Claude Code's install, which Grok cannot uninstall. */
+export function isClaudeSharedPluginPath(path: string | undefined): boolean {
+  return path !== undefined && CLAUDE_PLUGIN_CACHE_PATH.test(path);
+}
+
+/**
+ * Grok's loaded plugins and its listed ones, in the shape the snapshot is built from.
+ * `grok inspect` keeps reporting a disabled plugin as enabled, so a plugin counts as on
+ * when the session loads its skills; one that brings no skills keeps inspect's flag.
+ * Plugins Grok loads from Claude's install are keyed by their Claude marketplace.
+ */
+export function fromGrokPlugins(input: {
+  readonly inspection: GrokInspection;
+  readonly listed: ReadonlyArray<GrokListedPlugin>;
+}): PluginState {
+  const listedByName = new Map(
+    input.listed
+      .filter((entry) => entry.status === "installed")
+      .map((entry) => [entry.name, entry]),
+  );
+  const loadedSkillPlugins = new Set(
+    input.inspection.skills.flatMap((skill) =>
+      skill.source?.type === "plugin" && skill.source.plugin_name ? [skill.source.plugin_name] : [],
+    ),
+  );
+  const installed = input.inspection.plugins.map((plugin): InstalledPluginEntry => {
+    const listed = listedByName.get(plugin.name);
+    const claudeCache =
+      plugin.path === undefined ? null : CLAUDE_PLUGIN_CACHE_PATH.exec(plugin.path);
+    const marketplace = listed?.marketplace ?? claudeCache?.[1] ?? "local";
+    const version = listed?.version ?? claudeCache?.[3];
+    const bringsSkills = (plugin.provides?.skills ?? 0) > 0;
+    return {
+      id: `${plugin.name}@${marketplace}`,
+      enabled: bringsSkills ? loadedSkillPlugins.has(plugin.name) : (plugin.enabled ?? true),
+      ...(version ? { version } : {}),
+      ...(plugin.path === undefined ? {} : { installPath: plugin.path }),
+    };
+  });
+  const installedNames = new Set(input.inspection.plugins.map((plugin) => plugin.name));
+  return {
+    installed,
+    available: input.listed.flatMap((entry) =>
+      entry.status === "installed" || installedNames.has(entry.name) || !entry.marketplace
+        ? []
+        : [
+            {
+              pluginId: `${entry.name}@${entry.marketplace}`,
+              name: entry.name,
+              marketplaceName: entry.marketplace,
+              ...(entry.description ? { description: entry.description } : {}),
+              ...(entry.version ? { version: entry.version } : {}),
+            },
+          ],
+    ),
   };
 }
 
@@ -418,7 +539,7 @@ export const makeProviderPlugins = Effect.fn("makeProviderPlugins")(function* (
       cause,
     );
 
-  /** Run `<binary> plugin <args>` without a terminal, under the command deadline. */
+  /** Run `<binary> plugin <args>` (or another subcommand) without a terminal, under the command deadline. */
   const makeRunner =
     (input: {
       readonly instanceId: ProviderInstanceId;
@@ -427,10 +548,14 @@ export const makeProviderPlugins = Effect.fn("makeProviderPlugins")(function* (
       readonly binaryPath: string;
       readonly environment: NodeJS.ProcessEnv;
     }) =>
-    (args: ReadonlyArray<string>, directory?: string | undefined) =>
+    (
+      args: ReadonlyArray<string>,
+      directory?: string | undefined,
+      subcommand: ReadonlyArray<string> = ["plugin"],
+    ) =>
       Effect.gen(function* () {
         const { instanceId, operation, label, binaryPath, environment } = input;
-        const spawnCommand = yield* resolveSpawnCommand(binaryPath, ["plugin", ...args], {
+        const spawnCommand = yield* resolveSpawnCommand(binaryPath, [...subcommand, ...args], {
           env: environment,
         });
         const command = ChildProcess.make(spawnCommand.command, spawnCommand.args, {
@@ -476,7 +601,7 @@ export const makeProviderPlugins = Effect.fn("makeProviderPlugins")(function* (
 
   const readManifestDescription = (directory: string) =>
     Effect.firstSuccessOf(
-      [".codex-plugin", ".claude-plugin"].map((folder) =>
+      [".codex-plugin", ".grok-plugin", ".claude-plugin"].map((folder) =>
         fileSystem
           .readFileString(path.join(directory, folder, "plugin.json"))
           .pipe(Effect.flatMap(decodePluginManifest)),
@@ -666,6 +791,93 @@ export const makeProviderPlugins = Effect.fn("makeProviderPlugins")(function* (
     } satisfies PluginBackend;
   });
 
+  const makeGrokBackend = Effect.fn("ProviderPlugins.makeGrokBackend")(function* (
+    instanceId: ProviderInstanceId,
+    operation: string,
+  ) {
+    const entry = yield* readInstanceEntry(instanceId, operation);
+    const grokSettings = yield* decodeGrokSettings(entry?.config ?? {}).pipe(
+      Effect.mapError(invalidConfig(instanceId, operation)),
+    );
+    const home = yield* HostProcess.HomeDirectory;
+    const binaryPath = expandHomePath(grokSettings.binaryPath, home);
+    const environment = yield* mergeProviderInstanceEnvironment(entry?.environment);
+    const run = makeRunner({ instanceId, operation, label: "Grok", binaryPath, environment });
+    const invalidOutput = (cause: unknown) =>
+      fail(instanceId, operation, "command_failed", invalidOutputDetail("Grok"), cause);
+    // Inspect from the home directory, so a project's own plugins do not mix into the list.
+    const inspect = run(["--json"], home, ["inspect"]).pipe(
+      Effect.flatMap((output) => decodeGrokInspection(output).pipe(Effect.mapError(invalidOutput))),
+    );
+    const readListed = (withAvailable: boolean) =>
+      run(["list", "--json", ...(withAvailable ? ["--available"] : [])]).pipe(
+        Effect.flatMap((output) => decodeGrokListed(output).pipe(Effect.mapError(invalidOutput))),
+      );
+    const readMarketplaces = run(["marketplace", "list", "--json"]).pipe(
+      Effect.flatMap((output) =>
+        decodeGrokMarketplaces(output).pipe(Effect.mapError(invalidOutput)),
+      ),
+    );
+    // Grok addresses plugins by name; the `@marketplace` part only places the row.
+    const nameOf = (pluginId: string) => pluginId.slice(0, pluginId.lastIndexOf("@"));
+
+    return {
+      isBuiltInMarketplace: isClaudeBuiltInMarketplace,
+      listMarketplaces: readMarketplaces.pipe(
+        Effect.map((marketplaces) =>
+          marketplaces.map((marketplace) => {
+            const source = marketplace.source?.url ?? marketplace.source?.path;
+            return { name: marketplace.name, ...(source ? { source } : {}) };
+          }),
+        ),
+      ),
+      readState: (withAvailable) =>
+        Effect.all([inspect, readListed(withAvailable)], { concurrency: 2 }).pipe(
+          Effect.map(([inspection, listed]) => fromGrokPlugins({ inspection, listed })),
+        ),
+      describe: (install) =>
+        install.installPath === undefined
+          ? Effect.succeed(undefined)
+          : readManifestDescription(install.installPath),
+      addMarketplace: (source) => run(["marketplace", "add", source]).pipe(Effect.asVoid),
+      // Grok removes a source by its URL or path, not its name.
+      removeMarketplace: (name) =>
+        readMarketplaces.pipe(
+          Effect.flatMap((marketplaces) => {
+            const marketplace = marketplaces.find((candidate) => candidate.name === name);
+            const source = marketplace?.source?.url ?? marketplace?.source?.path;
+            return source
+              ? run(["marketplace", "remove", source]).pipe(Effect.asVoid)
+              : Effect.fail(
+                  fail(
+                    instanceId,
+                    operation,
+                    "not_found",
+                    "Grok no longer lists that marketplace.",
+                  ),
+                );
+          }),
+        ),
+      updateMarketplace: (name) => run(["marketplace", "update", name]).pipe(Effect.asVoid),
+      // Installing from a marketplace activates the plugin's hooks and servers, which the
+      // user asked for by pressing Install, so it is trusted the way `--trust` documents.
+      install: (pluginId) => run(["install", nameOf(pluginId), "--trust"]).pipe(Effect.asVoid),
+      uninstall: (install) =>
+        isClaudeSharedPluginPath(install.installPath)
+          ? Effect.fail(
+              fail(
+                instanceId,
+                operation,
+                "command_failed",
+                "Grok loads this plugin from Claude Code's install. Uninstall it from the Claude provider, or switch it off here.",
+              ),
+            )
+          : run(["uninstall", nameOf(install.id), "--confirm"]).pipe(Effect.asVoid),
+      setEnabled: (install, enabled) =>
+        run([enabled ? "enable" : "disable", nameOf(install.id)]).pipe(Effect.asVoid),
+    } satisfies PluginBackend;
+  });
+
   const resolveBackend = Effect.fn("ProviderPlugins.resolveBackend")(function* (
     instanceId: ProviderInstanceId,
     operation: string,
@@ -677,11 +889,14 @@ export const makeProviderPlugins = Effect.fn("makeProviderPlugins")(function* (
     if (instance?.driverKind === CODEX_DRIVER_KIND) {
       return yield* makeCodexBackend(instanceId, operation);
     }
+    if (instance?.driverKind === GROK_DRIVER_KIND) {
+      return yield* makeGrokBackend(instanceId, operation);
+    }
     return yield* fail(
       instanceId,
       operation,
       "unsupported_provider",
-      "Plugins are available for Claude and Codex instances.",
+      "Plugins are available for Claude, Codex, and Grok instances.",
     );
   });
 

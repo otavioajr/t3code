@@ -57,6 +57,7 @@ import {
 const PLUGIN_DRIVERS = new Set<string>([
   ProviderDriverKind.make("claudeAgent"),
   ProviderDriverKind.make("codex"),
+  ProviderDriverKind.make("grok"),
 ]);
 
 interface PluginActionError {
@@ -68,12 +69,14 @@ type PluginActionErrors = ReadonlyMap<string, PluginActionError>;
 
 const ALL_PROVIDERS = "all";
 
+const listFormat = new Intl.ListFormat("en", { style: "long", type: "conjunction" });
+
 /** One provider instance, or every one at once. */
 type PluginsSelection = ProviderInstanceId | typeof ALL_PROVIDERS;
 
 /**
- * Plugins are installed into a Claude or Codex instance on one environment, so the
- * page manages that environment's instances of those providers. Only marketplaces
+ * Plugins are installed into a Claude, Codex, or Grok instance on one environment, so
+ * the page manages that environment's instances of those providers. Only marketplaces
  * the user added are browsable; there is no catalog.
  */
 export function PluginsSettings({ environmentId }: { readonly environmentId: EnvironmentId }) {
@@ -236,7 +239,7 @@ function AddToAllProvidersSection({
   return (
     <SettingsSection title="All providers" headerAction={selector}>
       <AddMarketplaceRow
-        description={`Adds the repository to ${ready.map(instanceLabel).join(" and ")} at once.${
+        description={`Adds the repository to ${listFormat.format(ready.map(instanceLabel))} at once.${
           skipped > 0 ? " Providers that are off or not installed are skipped." : ""
         }`}
         canChange={canManage && ready.length > 0}

@@ -177,7 +177,9 @@ export interface PluginsReadinessView {
 
 /** The provider's own name, for copy that tells the user where to look. */
 export function pluginsProviderLabel(driver: string): string {
-  return driver === "codex" ? "Codex" : "Claude Code";
+  if (driver === "codex") return "Codex";
+  if (driver === "grok") return "Grok";
+  return "Claude Code";
 }
 
 /** Why the provider instance cannot manage plugins right now, or null when it can. */

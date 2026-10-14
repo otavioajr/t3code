@@ -30,8 +30,8 @@ covers installation and custom configuration.
 Manage Codex plugins in **Settings → Plugins** by picking the Codex instance at the top of the
 page. Add a marketplace by pasting its GitHub link or `owner/repo`, then install the plugins it
 offers. A plugin's switch turns it on or off, and **Uninstall** removes it from Codex.
-With both Claude and Codex set up, **All providers** adds a marketplace to each of them at
-once.
+With more than one of Claude, Codex, and Grok set up, **All providers** adds a marketplace to
+each of them at once.
 
 Plugins that ship with Codex are listed under built-in marketplaces, which you can switch on or
 off but not update or remove. Plugins are not available yet for instances connected with ChatGPT

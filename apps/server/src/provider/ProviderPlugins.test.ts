@@ -24,6 +24,8 @@ import {
   makeProviderPlugins,
   normalizeMarketplaceSource,
   fromCodexPlugins,
+  fromGrokPlugins,
+  isClaudeSharedPluginPath,
   representativeInstalls,
 } from "./ProviderPlugins.ts";
 
@@ -239,6 +241,69 @@ describe("Codex plugin data", () => {
       ["github@openai-curated-remote", true],
       ["lint@team", false],
     ]);
+  });
+});
+
+describe("Grok plugin data", () => {
+  it("treats git's missing-repository message as an access problem", () => {
+    expect(
+      classifyPluginCommandFailure(
+        "",
+        "Error: git ls-remote failed: fatal: repository 'https://github.com/x/y.git/' not found",
+        1,
+      ).reason,
+    ).toBe("access_denied");
+  });
+
+  it("reads on and off from loaded skills, and places Claude-installed plugins by marketplace", () => {
+    const state = fromGrokPlugins({
+      inspection: {
+        plugins: [
+          {
+            name: "mattpocock-skills",
+            path: "/Users/me/.claude/plugins/cache/mattpocock/mattpocock-skills/1.3.1",
+            enabled: true,
+            provides: { skills: 27 },
+          },
+          {
+            name: "lint",
+            path: "/Users/me/.grok/installed-plugins/lint-1",
+            enabled: true,
+            provides: { skills: 2 },
+          },
+          { name: "hooks-only", enabled: true, provides: { skills: 0 } },
+        ],
+        skills: [{ source: { type: "plugin", plugin_name: "mattpocock-skills" } }],
+      },
+      listed: [
+        { status: "installed", name: "lint", version: "2.0.0", marketplace: "team" },
+        { status: "available", name: "format", marketplace: "team", description: "Formats" },
+        { status: "available", name: "lint", marketplace: "team" },
+      ],
+    });
+    expect(state.installed).toEqual([
+      {
+        id: "mattpocock-skills@mattpocock",
+        enabled: true,
+        version: "1.3.1",
+        installPath: "/Users/me/.claude/plugins/cache/mattpocock/mattpocock-skills/1.3.1",
+      },
+      {
+        id: "lint@team",
+        enabled: false,
+        version: "2.0.0",
+        installPath: "/Users/me/.grok/installed-plugins/lint-1",
+      },
+      { id: "hooks-only@local", enabled: true },
+    ]);
+    expect(state.available).toEqual([
+      { pluginId: "format@team", name: "format", marketplaceName: "team", description: "Formats" },
+    ]);
+  });
+
+  it("recognizes a plugin Grok loads from Claude's install", () => {
+    expect(isClaudeSharedPluginPath("/Users/me/.claude/plugins/cache/team/lint/1.0.0")).toBe(true);
+    expect(isClaudeSharedPluginPath("/Users/me/.grok/installed-plugins/lint-1")).toBe(false);
   });
 });
 
