@@ -2,7 +2,7 @@ import {
   ATTACHMENT_ONLY_BOOTSTRAP_PROMPT,
   collectComposerContextReferences,
 } from "@t3tools/shared/composerContextReferences";
-import { PLAN_IMPLEMENTATION_PROMPT_PREFIX } from "../../proposedPlan";
+import { isPlanImplementationPrompt, stripPlanFirstPrompt } from "../../proposedPlan";
 
 /**
  * Terminal-style prompt recall for the composer. ArrowUp on an empty
@@ -151,11 +151,8 @@ export function recallableComposerPrompt(messageText: string): string {
   }
 
   // App-composed sends are not text the user typed, so they are not history.
-  const trimmed = prompt.trim();
-  if (
-    trimmed === ATTACHMENT_ONLY_BOOTSTRAP_PROMPT ||
-    trimmed.startsWith(PLAN_IMPLEMENTATION_PROMPT_PREFIX)
-  ) {
+  const trimmed = stripPlanFirstPrompt(prompt.trim()).trim();
+  if (trimmed === ATTACHMENT_ONLY_BOOTSTRAP_PROMPT || isPlanImplementationPrompt(trimmed)) {
     return "";
   }
   return trimmed;

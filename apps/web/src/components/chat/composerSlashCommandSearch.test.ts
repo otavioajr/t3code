@@ -10,6 +10,38 @@ import {
 describe("searchSlashCommandItems", () => {
   const claudeDriver = ProviderDriverKind.make("claudeAgent");
 
+  it("ranks the built-in /plan first for a plan query, above skills that mention planning", () => {
+    const items = [
+      {
+        id: "skill:grok:execute-plan",
+        type: "skill",
+        provider: claudeDriver,
+        skill: { name: "Execute Plan", path: "/skills/execute-plan/SKILL.md", enabled: true },
+        label: "/skill:Execute Plan",
+        description: "Execute a written plan",
+      },
+      {
+        id: "provider-slash-command:claudeAgent:plan-review",
+        type: "provider-slash-command",
+        provider: claudeDriver,
+        command: { name: "plan" },
+        label: "/plan",
+        description: "Provider plan",
+      },
+      {
+        id: "slash:plan",
+        type: "slash-command",
+        command: "plan",
+        label: "/plan",
+        description: "Plan first, then review and build",
+      },
+    ] satisfies Array<
+      Extract<ComposerCommandItem, { type: "slash-command" | "provider-slash-command" | "skill" }>
+    >;
+
+    expect(searchSlashCommandItems(items, "plan")[0]?.id).toBe("slash:plan");
+  });
+
   it("moves exact provider command matches ahead of broader description matches", () => {
     const items = [
       {

@@ -33,6 +33,7 @@ import {
   FileDiff,
   Files,
   Globe2,
+  ListChecks,
   Plus,
   TerminalSquare,
 } from "lucide-react";
@@ -121,6 +122,8 @@ interface RightPanelTabsProps {
    */
   previewRuntimeTabId?: ((tabId: string) => string) | undefined;
   terminalLabelsById: ReadonlyMap<string, string>;
+  /** Plan titles by plan id for `plan` tabs; a tab without an entry reads "Plan". */
+  planTitlesById?: ReadonlyMap<string, string>;
   onActivate: (surface: RightPanelSurface) => void;
   onRenameDevice?: (surfaceId: string, title: string) => void;
   onCloseSurface: (surface: RightPanelSurface) => void;
@@ -599,6 +602,7 @@ function surfaceTitle(
   surface: RightPanelSurface,
   sessions: Readonly<Record<string, PreviewSessionSnapshot>>,
   terminalLabelsById: ReadonlyMap<string, string>,
+  planTitlesById: ReadonlyMap<string, string> | undefined,
 ): string {
   switch (surface.kind) {
     case "diff":
@@ -618,6 +622,8 @@ function surfaceTitle(
       return `#${surface.number}`;
     case "pull-requests":
       return "Pull requests";
+    case "plan":
+      return planTitlesById?.get(surface.planId) ?? "Plan";
     case "device":
       return surface.title ?? surface.target?.name ?? "Device";
     case "preview": {
@@ -701,6 +707,8 @@ function SurfaceIcon({
       );
     case "pull-requests":
       return <PullRequestGlyph.link className="size-3 shrink-0" />;
+    case "plan":
+      return <ListChecks className="size-3 shrink-0" />;
     case "device":
       return surface.target?.platform === "ios" ? (
         <AppleIcon className="size-3 shrink-0" />
@@ -1196,6 +1204,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                   surface,
                   props.previewSessions,
                   props.terminalLabelsById,
+                  props.planTitlesById,
                 );
                 const previewTabId = previewTabIdOf(surface, props.previewSessions);
                 // Desktop state is keyed by the session id, but desktop actions

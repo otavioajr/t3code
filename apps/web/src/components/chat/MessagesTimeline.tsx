@@ -25,6 +25,7 @@ import {
   type EnvironmentId,
   type MessageId,
   type OrchestrationV2TurnItem,
+  type PlanId,
   type RunAttemptId,
   type ScopedThreadRef,
   type ServerProvider,
@@ -158,7 +159,14 @@ import type {
   ComposerContextRecord,
   KnownComposerContextRecord,
 } from "@t3tools/contracts";
+import { Badge } from "../ui/badge";
 import { Button, InlineButton } from "../ui/button";
+import {
+  PLAN_FIRST_PROMPT_PREFIX,
+  parseAppComposedPlanMessage,
+  stripPlanFirstPrompt,
+  type AppComposedPlanMessage,
+} from "../../proposedPlan";
 import { MorphIcon } from "~/components/MorphIcon";
 import { useAssetUrlRefresh, useAssetUrls, useAssetUrlState } from "../../assets/assetUrls";
 import { MediaVideoPlayer } from "../media/MediaVideoPlayer";
@@ -342,6 +350,8 @@ interface TimelineRowSharedState {
   onImageExpand: (preview: ExpandedImagePreview) => void;
   displayThreadKey?: string;
   onOpenTurnDiff: (runId: RunId, filePath?: string) => void;
+  /** Opens a proposed plan in the right panel. */
+  onOpenPlan: ((planId: PlanId) => void) | undefined;
   onOpenThread: (threadId: OrchestrationV2TurnItem["threadId"]) => void;
   onForkFromRun: (input: {
     readonly sourceThreadId: ThreadId;
@@ -485,6 +495,7 @@ interface MessagesTimelineProps {
   /** The rows are a held snapshot of the previous thread while the next one loads. */
   paintOnly?: boolean;
   onOpenTurnDiff: (runId: RunId, filePath?: string) => void;
+  onOpenPlan?: ((planId: PlanId) => void) | undefined;
   onOpenThread: (threadId: OrchestrationV2TurnItem["threadId"]) => void;
   parentThreadLink?: {
     readonly threadId: ThreadId;
@@ -600,6 +611,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
   displayThreadKey,
   paintOnly = false,
   onOpenTurnDiff,
+  onOpenPlan,
   onOpenThread,
   parentThreadLink = null,
   onForkFromRun,
@@ -1373,6 +1385,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
       onFileDownload,
       openPullRequest,
       onOpenTurnDiff,
+      onOpenPlan,
       onOpenThread,
       onForkFromRun,
       onRollbackCheckpoint,
@@ -1411,6 +1424,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
       onFileDownload,
       openPullRequest,
       onOpenTurnDiff,
+      onOpenPlan,
       onOpenThread,
       onForkFromRun,
       onRollbackCheckpoint,
@@ -2270,7 +2284,61 @@ function MessageAuthorHeading({ children }: { children: string }) {
 }
 
 function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {
+  const composed = useMemo(() => parseAppComposedPlanMessage(row.message.text), [row.message.text]);
+  return composed !== null && composed.kind !== "plan-first" ? (
+    <PlanComposedUserRow text={row.message.text} composed={composed} />
+  ) : (
+    <UserMessageRow row={row} />
+  );
+}
+
+/** Build and Build with subagent send long app-written prompts; one line, with the text on click. */
+function PlanComposedUserRow({
+  text,
+  composed,
+}: {
+  text: string;
+  composed: Exclude<AppComposedPlanMessage, { kind: "plan-first" }>;
+}) {
   const ctx = use(TimelineRowCtx);
+  const [open, setOpen] = useState(false);
+  const modelLabel =
+    composed.kind === "subagent" && composed.target
+      ? (ctx.providerStatuses
+          .find((provider) => provider.instanceId === composed.target?.providerInstanceId)
+          ?.models.find((model) => model.slug === composed.target?.model)?.name ??
+        composed.target.model)
+      : null;
+  const label =
+    composed.kind === "subagent"
+      ? `Build with subagent${modelLabel ? ` · ${modelLabel}` : ""}`
+      : `Build plan${composed.planTitle ? ` · ${composed.planTitle}` : ""}`;
+  return (
+    <div className="group flex flex-col items-end gap-1">
+      <Button
+        variant="secondary"
+        size="sm"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <ChevronRightIcon
+          aria-hidden="true"
+          className={cn("size-3.5 transition-transform", open && "rotate-90")}
+        />
+        <span className="max-w-[60ch] truncate">{label}</span>
+      </Button>
+      {open ? (
+        <div className="max-w-[80%] rounded-2xl bg-message p-3 text-message-foreground">
+          <pre className="whitespace-pre-wrap break-words font-sans text-sm">{text}</pre>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function UserMessageRow({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {
+  const ctx = use(TimelineRowCtx);
+  const [instructionOpen, setInstructionOpen] = useState(false);
   const { onImageExpand, onFileOpen } = ctx;
   const senderThreadId = row.message.senderThreadId;
   const resources = useMemo(
@@ -2303,8 +2371,18 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
   const unknownAttachments = (row.message.attachments ?? []).filter(
     (attachment) => !isImageAttachment(attachment) && !isFileAttachment(attachment),
   );
-  const userMessage = resolveUserMessagePresentation(row.message);
-  const resolvedContext = useMemo(() => resolveUserMessageContext(row.message), [row.message]);
+  // A plan-first send carries the app's instruction; the bubble shows only what the user wrote.
+  const planFirstText = stripPlanFirstPrompt(row.message.text);
+  const sentPlanFirst = planFirstText !== row.message.text;
+  const displayMessage = useMemo(
+    () => (sentPlanFirst ? { ...row.message, text: planFirstText } : row.message),
+    [planFirstText, row.message, sentPlanFirst],
+  );
+  const userMessage = resolveUserMessagePresentation(displayMessage);
+  const resolvedContext = useMemo(
+    () => resolveUserMessageContext(displayMessage),
+    [displayMessage],
+  );
   const previewImages = useMemo(
     () => userImages.filter((image) => image.name.startsWith("preview-annotation-")),
     [userImages],
@@ -2481,6 +2559,24 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
       ) : null}
       {row.message.inputIntent && row.message.inputIntent !== "turn_start" ? (
         <UserMessageIntentMarker intent={row.message.inputIntent} />
+      ) : null}
+      {sentPlanFirst ? (
+        <div className="me-1 flex flex-col items-end gap-1">
+          <button
+            type="button"
+            aria-expanded={instructionOpen}
+            aria-label="Show the plan-first instruction"
+            className="cursor-pointer rounded-sm focus-visible:outline-2 focus-visible:outline-ring"
+            onClick={() => setInstructionOpen((value) => !value)}
+          >
+            <Badge variant="secondary">Plan</Badge>
+          </button>
+          {instructionOpen ? (
+            <p className="max-w-[80%] text-2xs text-muted-foreground">
+              {PLAN_FIRST_PROMPT_PREFIX.trim()}
+            </p>
+          ) : null}
+        </div>
       ) : null}
       <div className="relative max-w-[80%] rounded-2xl bg-message p-3 text-message-foreground">
         <MessageAuthorHeading>You</MessageAuthorHeading>
@@ -3033,10 +3129,8 @@ function ProposedPlanTimelineRow({
       <ProposedPlanCard
         planMarkdown={row.proposedPlan.planMarkdown}
         environmentId={ctx.activeThreadEnvironmentId}
-        threadRef={ctx.threadRef ?? undefined}
-        cwd={ctx.markdownCwd}
         workspaceRoot={ctx.workspaceRoot}
-        findActive={ctx.findActive}
+        onOpen={ctx.onOpenPlan ? () => ctx.onOpenPlan?.(row.proposedPlan.id) : undefined}
       />
     </div>
   );

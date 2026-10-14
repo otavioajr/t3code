@@ -110,5 +110,11 @@ export function searchSlashCommandItems(
     );
   }
 
-  return ranked.map((entry) => entry.item);
+  const results = ranked.map((entry) => entry.item);
+  // The built-in /plan outranks provider commands and skills that merely mention planning.
+  const planIndex = results.findIndex(
+    (item) => item.type === "slash-command" && item.command === "plan",
+  );
+  if (planIndex > 0) results.unshift(...results.splice(planIndex, 1));
+  return results;
 }

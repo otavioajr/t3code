@@ -217,11 +217,9 @@ export function codexArtifactTemplatePromptToAppend(
 export const LastInvokedScriptByProjectSchema = Schema.Record(ProjectId, Schema.String);
 
 export function resolveEffectiveInteractionMode(input: {
-  planModeEnabled: boolean;
   composerInteractionMode: ProviderInteractionMode | null;
   threadInteractionMode: ProviderInteractionMode | null | undefined;
 }): ProviderInteractionMode {
-  if (!input.planModeEnabled) return "default";
   return input.composerInteractionMode ?? input.threadInteractionMode ?? "default";
 }
 
@@ -624,17 +622,16 @@ export function resolveComposerProviderSelection(input: {
 
 /** Keep restored drafts and every plan control on the selected instance's supported mode. */
 export function resolveComposerInteractionMode(input: {
-  planModeEnabled: boolean;
   provider: Pick<ServerProvider, "showInteractionModeToggle"> | null | undefined;
   interactionMode: ProviderInteractionMode;
-}): { enabled: boolean; interactionMode: ProviderInteractionMode } {
-  const enabled =
-    input.planModeEnabled &&
-    input.provider != null &&
-    input.provider.showInteractionModeToggle !== false;
+}): { enabled: boolean; interactionMode: ProviderInteractionMode; planFirst: boolean } {
+  const enabled = input.provider != null && input.provider.showInteractionModeToggle !== false;
   return {
     enabled,
+    // Without the native toggle the turn is always a default one; "plan" then only means the
+    // app prepends its plan-first instruction (`planFirst`).
     interactionMode: enabled ? input.interactionMode : "default",
+    planFirst: input.provider != null && !enabled && input.interactionMode === "plan",
   };
 }
 

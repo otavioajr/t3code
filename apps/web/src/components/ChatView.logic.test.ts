@@ -217,20 +217,18 @@ describe("resolveDraftPromotionNavigationTarget", () => {
 });
 
 describe("resolveEffectiveInteractionMode", () => {
-  it("forces build mode when legacy plan mode is disabled", () => {
+  it("prefers the composer mode over the thread mode", () => {
     expect(
       resolveEffectiveInteractionMode({
-        planModeEnabled: false,
         composerInteractionMode: "plan",
-        threadInteractionMode: "plan",
+        threadInteractionMode: "default",
       }),
-    ).toBe("default");
+    ).toBe("plan");
   });
 
-  it("uses the saved mode while legacy plan mode is enabled", () => {
+  it("falls back to the saved thread mode", () => {
     expect(
       resolveEffectiveInteractionMode({
-        planModeEnabled: true,
         composerInteractionMode: null,
         threadInteractionMode: "plan",
       }),
@@ -1481,10 +1479,9 @@ describe("resolveComposerProviderSelection", () => {
     expect(
       resolveComposerInteractionMode({
         provider: selection.selectedProviderEntry?.snapshot,
-        planModeEnabled: true,
         interactionMode: "plan",
       }),
-    ).toEqual({ enabled: false, interactionMode: "default" });
+    ).toEqual({ enabled: false, interactionMode: "default", planFirst: true });
   });
 
   it("uses the fallback provider's plan capability after the draft's instance is disabled", () => {
@@ -1504,10 +1501,9 @@ describe("resolveComposerProviderSelection", () => {
     expect(
       resolveComposerInteractionMode({
         provider: selection.selectedProviderEntry?.snapshot,
-        planModeEnabled: true,
         interactionMode: "plan",
       }),
-    ).toEqual({ enabled: true, interactionMode: "plan" });
+    ).toEqual({ enabled: true, interactionMode: "plan", planFirst: false });
   });
 
   it("keeps a signed-out selection instead of silently switching providers", () => {
@@ -1649,44 +1645,31 @@ describe("resolveComposerProviderSelection", () => {
 });
 
 describe("resolveComposerInteractionMode", () => {
-  it("resets a restored plan draft when the selected instance does not support plan mode", () => {
+  it("turns a restored plan draft into plan-first when the selected instance has no native plan mode", () => {
     expect(
       resolveComposerInteractionMode({
-        planModeEnabled: true,
         provider: { showInteractionModeToggle: false },
         interactionMode: "plan",
       }),
-    ).toEqual({ enabled: false, interactionMode: "default" });
+    ).toEqual({ enabled: false, interactionMode: "default", planFirst: true });
   });
 
   it("keeps legacy plan behavior for providers that omit the capability", () => {
     expect(
       resolveComposerInteractionMode({
-        planModeEnabled: true,
         provider: {},
         interactionMode: "plan",
       }),
-    ).toEqual({ enabled: true, interactionMode: "plan" });
-  });
-
-  it("resets a restored plan draft when the beta setting is off", () => {
-    expect(
-      resolveComposerInteractionMode({
-        planModeEnabled: false,
-        provider: { showInteractionModeToggle: true },
-        interactionMode: "plan",
-      }),
-    ).toEqual({ enabled: false, interactionMode: "default" });
+    ).toEqual({ enabled: true, interactionMode: "plan", planFirst: false });
   });
 
   it("disables plan mode until the selected provider is available", () => {
     expect(
       resolveComposerInteractionMode({
-        planModeEnabled: true,
         provider: null,
         interactionMode: "plan",
       }),
-    ).toEqual({ enabled: false, interactionMode: "default" });
+    ).toEqual({ enabled: false, interactionMode: "default", planFirst: false });
   });
 });
 
