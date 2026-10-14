@@ -121,7 +121,8 @@ import { isModelPickerOpen } from "../modelPickerVisibility";
 import { useShortcutModifierState } from "../shortcutModifierState";
 import { ensureLocalApi, readLocalApi } from "../localApi";
 import { useComposerDraftStore } from "../composerDraftStore";
-import { useNewThreadHandler } from "../hooks/useHandleNewThread";
+import { useHandleNewThread, useNewThreadHandler } from "../hooks/useHandleNewThread";
+import { startNewThreadFromContext } from "../lib/chatThreadActions";
 import { useDesktopUpdateState } from "../state/desktopUpdate";
 
 import { useThreadActions } from "../hooks/useThreadActions";
@@ -744,7 +745,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
         data-size="sm"
         data-testid={`thread-row-${thread.id}`}
         className={cn(
-          "relative isolate flex h-8 w-full min-w-0 cursor-pointer select-none items-center gap-2 overflow-hidden rounded-md px-2 text-left text-xs outline-hidden focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring group-data-[collapsible=icon]:hidden [&>span:last-child]:truncate [&>svg:not([class*='size-'])]:size-4 [&>svg]:shrink-0 [&>svg]:text-sidebar-muted-foreground",
+          "relative isolate flex h-7 w-full min-w-0 cursor-pointer select-none items-center gap-2 overflow-hidden rounded-md px-2 text-left text-xs outline-hidden focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring group-data-[collapsible=icon]:hidden [&>span:last-child]:truncate [&>svg:not([class*='size-'])]:size-4 [&>svg]:shrink-0 [&>svg]:text-sidebar-muted-foreground",
           isActive
             ? "bg-sidebar-row-active font-medium text-sidebar-foreground hover:bg-sidebar-row-active"
             : isSelected
@@ -1061,7 +1062,8 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
   return (
     <SidebarMenuSub
       ref={attachThreadListAutoAnimateRef}
-      className="mx-0.5 my-0 w-full translate-x-0 overflow-hidden sm:mx-1"
+      variant="flat"
+      className="my-0 w-full overflow-hidden"
     >
       {shouldShowThreadPanel && showEmptyThreadState ? (
         <SidebarMenuSubItem className="w-full" data-thread-selection-safe>
@@ -2479,7 +2481,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
             <ProjectFavicon project={project} />
           </span>
           <span className="flex min-w-0 flex-1 items-center gap-2">
-            <span className="truncate text-sm font-medium text-sidebar-foreground/90">
+            <span className="truncate text-xs font-medium text-sidebar-muted-foreground transition-colors duration-150 group-hover/project-header:text-sidebar-foreground">
               {project.displayName}
             </span>
             {project.groupedProjectCount > 1 ? (
@@ -2989,6 +2991,30 @@ interface SidebarProjectsContentProps {
   projectsLength: number;
 }
 
+/** Starts a thread in the current project, like chat.new; with no project in context it opens the project picker. */
+function SidebarNewAgentButton({ shortcutLabel }: { readonly shortcutLabel: string | null }) {
+  const { activeDraftThread, activeThread, defaultProjectRef, handleNewThread } =
+    useHandleNewThread();
+  const handleClick = useCallback(() => {
+    void startNewThreadFromContext({
+      activeDraftThread,
+      activeThread: activeThread ?? undefined,
+      defaultProjectRef,
+      handleNewThread,
+    }).then((created) => {
+      if (!created) openCommandPalette({ open: "new-thread-in" });
+    });
+  }, [activeDraftThread, activeThread, defaultProjectRef, handleNewThread]);
+
+  return (
+    <SidebarMenuButton data-testid="sidebar-new-agent" onClick={handleClick}>
+      <SquarePenIcon />
+      <span className="flex-1 truncate">New Agent</span>
+      {shortcutLabel ? <Kbd>{shortcutLabel}</Kbd> : null}
+    </SidebarMenuButton>
+  );
+}
+
 const SidebarProjectsContent = memo(function SidebarProjectsContent(
   props: SidebarProjectsContentProps,
 ) {
@@ -3058,6 +3084,9 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
         // header and would otherwise paint across the search row's outline.
         <SidebarGroup className="z-[1]">
           <SidebarMenu>
+            <SidebarMenuItem>
+              <SidebarNewAgentButton shortcutLabel={newThreadShortcutLabel} />
+            </SidebarMenuItem>
             <SidebarMenuItem>
               <CommandDialogTrigger
                 render={<SidebarMenuButton data-testid="command-palette-trigger" />}

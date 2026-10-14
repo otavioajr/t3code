@@ -770,11 +770,21 @@ function SidebarMenuButton({
   );
 }
 
-function SidebarMenuSub({ className, ...props }: React.ComponentProps<"ul">) {
+/**
+ * `flat` drops the indent guide and aligns rows under their parent's label, for
+ * lists where the parent row already reads as a group heading.
+ */
+function SidebarMenuSub({
+  className,
+  variant = "default",
+  ...props
+}: React.ComponentProps<"ul"> & { variant?: "default" | "flat" }) {
   return (
     <ul
       className={cn(
-        "mx-3.5 flex min-w-0 translate-x-px flex-col gap-1 border-sidebar-border border-l px-2.5 py-0.5",
+        variant === "flat"
+          ? "flex min-w-0 flex-col gap-px py-0.5 pl-5"
+          : "mx-3.5 flex min-w-0 translate-x-px flex-col gap-1 border-sidebar-border border-l px-2.5 py-0.5",
         "group-data-[collapsible=icon]:hidden",
         className,
       )}
