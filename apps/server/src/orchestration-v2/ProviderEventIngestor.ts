@@ -4,6 +4,7 @@ import {
   OrchestrationV2DomainEvent,
   OrchestrationV2StoredEvent,
   type OrchestrationV2PlanArtifact,
+  type OrchestrationV2TurnItem,
   type OrchestrationV2Run,
   type OrchestrationV2ProviderTurn,
   type OrchestrationV2Subagent,
@@ -17,15 +18,21 @@ import {
   ProviderTurnId,
   RawEventId,
   RunAttemptId,
+  PlanId,
   RunId,
   ThreadId,
+  TurnItemId,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
+import { CREATE_PLAN_TOOL_NAME, CreatePlanInput } from "@t3tools/shared/createPlan";
+import { compactDynamicToolOutput } from "@t3tools/shared/toolOutput";
+import { resolveT3McpToolId } from "@t3tools/shared/t3McpToolPresentation";
 import { AgentScope } from "@t3tools/shared/AgentScope";
 import { getModelSelectionStringOptionValue, modelSelectionsEqual } from "@t3tools/shared/model";
 import * as AnalyticsService from "../telemetry/AnalyticsService.ts";
@@ -133,6 +140,73 @@ function providerTurnAnalyticsProperties(input: {
           ),
         }
       : {}),
+  };
+}
+
+const decodeCreatePlanInput = Schema.decodeUnknownOption(CreatePlanInput);
+
+// Grok wraps MCP tool arguments as { tool_name, tool_input }.
+const decodeCreatePlanArguments = (input: unknown) => {
+  const direct = decodeCreatePlanInput(input);
+  if (Option.isSome(direct) || typeof input !== "object" || input === null) return direct;
+  return decodeCreatePlanInput((input as { readonly tool_input?: unknown }).tool_input);
+};
+
+/**
+ * A successful `create_plan` call is a proposed plan, so it gets the same plan
+ * artifact and turn item a native proposed plan has, and the same "implement
+ * this plan" path works for every provider. Ids derive from the tool item's,
+ * so a repeated update of the call maps to the same plan. Returns null for any
+ * other item, a call that has not completed, or arguments that do not decode.
+ */
+export function proposedPlanFromCreatePlanCall(item: OrchestrationV2TurnItem): {
+  readonly plan: Extract<OrchestrationV2PlanArtifact, { readonly kind: "proposed_plan" }>;
+  readonly turnItem: OrchestrationV2TurnItem;
+} | null {
+  if (
+    item.type !== "dynamic_tool" ||
+    item.status !== "completed" ||
+    item.nodeId === null ||
+    resolveT3McpToolId(item.toolName) !== CREATE_PLAN_TOOL_NAME
+  ) {
+    return null;
+  }
+  // Some adapters report a failed MCP call as completed; its output says so.
+  if (compactDynamicToolOutput(item.output)?.isError) return null;
+  const decoded = decodeCreatePlanArguments(item.input);
+  if (Option.isNone(decoded)) return null;
+  const { title, markdown } = decoded.value;
+  const planId = PlanId.make(`plan:create-plan:${item.id}`);
+  return {
+    plan: {
+      id: planId,
+      threadId: item.threadId,
+      runId: item.runId,
+      nodeId: item.nodeId,
+      kind: "proposed_plan",
+      status: "active",
+      markdown,
+    },
+    turnItem: {
+      id: TurnItemId.make(`turn-item:create-plan:${item.id}`),
+      threadId: item.threadId,
+      runId: item.runId,
+      nodeId: item.nodeId,
+      providerThreadId: item.providerThreadId,
+      providerTurnId: item.providerTurnId,
+      nativeItemRef: item.nativeItemRef,
+      parentItemId: null,
+      ordinal: item.ordinal,
+      status: "completed",
+      title,
+      startedAt: item.startedAt,
+      completedAt: item.completedAt ?? item.updatedAt,
+      updatedAt: item.updatedAt,
+      type: "proposed_plan",
+      planId,
+      markdown,
+      streaming: false,
+    },
   };
 }
 
@@ -643,18 +717,42 @@ export const layer: Layer.Layer<
                 nodeId: input.event.message.nodeId,
               }),
             ];
-          case "turn_item.updated":
+          case "turn_item.updated": {
+            const turnItem = input.event.turnItem;
+            const toolEvent = yield* makeDomainEvent(input, {
+              type: "turn-item.updated",
+              threadId: turnItem.threadId,
+              payload: boundFileChangeForStorage(stripUnservedToolOutputImageBytes(turnItem)),
+              runId: turnItem.runId,
+              nodeId: turnItem.nodeId,
+            });
+            const proposed = proposedPlanFromCreatePlanCall(turnItem);
+            // Only the first completion creates the plan. Later updates of the
+            // call must not reopen a plan the user already implemented.
+            if (
+              proposed === null ||
+              (yield* projections.getPlan(proposed.plan.threadId, proposed.plan.id)) !== undefined
+            ) {
+              return [toolEvent];
+            }
             return [
+              toolEvent,
+              yield* makeDomainEvent(input, {
+                type: "plan.updated",
+                threadId: proposed.plan.threadId,
+                payload: proposed.plan,
+                runId: proposed.plan.runId,
+                nodeId: proposed.plan.nodeId,
+              }),
               yield* makeDomainEvent(input, {
                 type: "turn-item.updated",
-                threadId: input.event.turnItem.threadId,
-                payload: boundFileChangeForStorage(
-                  stripUnservedToolOutputImageBytes(input.event.turnItem),
-                ),
-                runId: input.event.turnItem.runId,
-                nodeId: input.event.turnItem.nodeId,
+                threadId: proposed.turnItem.threadId,
+                payload: proposed.turnItem,
+                runId: proposed.turnItem.runId,
+                nodeId: proposed.turnItem.nodeId,
               }),
             ];
+          }
           case "runtime_request.updated":
             return [
               yield* makeDomainEvent(input, {

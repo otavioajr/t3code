@@ -599,9 +599,9 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "legacy-plan-mode",
-    title: "Plan mode (legacy)",
+    title: "OpenCode plan agent (legacy)",
     to: "/settings/general",
-    searchTerms: ["build plan composer old"],
+    searchTerms: ["build plan composer old opencode agent"],
   },
   {
     id: "legacy-context-window-indicator",

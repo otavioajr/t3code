@@ -1,28 +1,19 @@
-import { proposedPlanTitle, stripDisplayedPlanMarkdown } from "@t3tools/shared/proposedPlanText";
-import { memo, useCallback, useState, useId } from "react";
-import { useFindRevealRef } from "./markdownFindContext";
+import { proposedPlanTitle } from "@t3tools/shared/proposedPlanText";
+import { memo, useState, useId } from "react";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
+import { AuthFilesystemWriteScope, type EnvironmentId } from "@t3tools/contracts";
 import {
-  AuthFilesystemWriteScope,
-  type EnvironmentId,
-  type ScopedThreadRef,
-} from "@t3tools/contracts";
-import {
-  buildCollapsedProposedPlanPreviewMarkdown,
   buildProposedPlanMarkdownFilename,
   downloadPlanAsTextFile,
   normalizePlanMarkdownForExport,
 } from "../../proposedPlan";
-import ChatMarkdown from "../ChatMarkdown";
-import { EllipsisIcon } from "lucide-react";
+import { ChevronRightIcon, EllipsisIcon } from "lucide-react";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
-import { cn } from "~/lib/utils";
-import { Badge } from "../ui/badge";
 import {
   Dialog,
   DialogDescription,
@@ -41,19 +32,15 @@ import { readEnvironmentScope, useEnvironmentScope } from "~/state/session";
 export const ProposedPlanCard = memo(function ProposedPlanCard({
   planMarkdown,
   environmentId,
-  threadRef,
-  cwd,
   workspaceRoot,
-  findActive = false,
+  onOpen,
 }: {
   planMarkdown: string;
   environmentId: EnvironmentId;
-  threadRef?: ScopedThreadRef | undefined;
-  cwd: string | undefined;
   workspaceRoot: string | undefined;
-  findActive?: boolean;
+  /** Opens the plan in the right panel. */
+  onOpen: (() => void) | undefined;
 }) {
-  const [expanded, setExpanded] = useState(false);
   const canWriteFiles = useEnvironmentScope(environmentId, AuthFilesystemWriteScope);
   const [isSaveDialogOpen, setIsSaveDialogOpen] = useState(false);
   const [savePath, setSavePath] = useState("");
@@ -75,18 +62,6 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
   });
   const savePathInputId = useId();
   const title = proposedPlanTitle(planMarkdown) ?? "Proposed plan";
-  const lineCount = planMarkdown.split("\n").length;
-  const canCollapse = planMarkdown.length > 900 || lineCount > 20;
-  const displayedPlanMarkdown = stripDisplayedPlanMarkdown(planMarkdown);
-  const collapsedPreview = canCollapse
-    ? buildCollapsedProposedPlanPreviewMarkdown(planMarkdown, { maxLines: 10 })
-    : null;
-  const isCollapsed = canCollapse && !expanded;
-  // While finding, the full plan stays mounted but clipped, so a match past the
-  // preview can be counted and then opened only once it is selected.
-  const showPreview = isCollapsed && !findActive;
-  const revealForFind = useCallback(() => setExpanded(true), []);
-  const findRevealRef = useFindRevealRef(revealForFind);
   const downloadFilename = buildProposedPlanMarkdownFilename(planMarkdown);
   const saveContents = normalizePlanMarkdownForExport(planMarkdown);
 
@@ -161,79 +136,38 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
   };
 
   return (
-    <div className="rounded-3xl border border-border/80 bg-card/70 p-4 sm:p-5">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-2">
-          <Badge variant="secondary">Plan</Badge>
-          {/* Same heading level as the message author headings in the timeline,
-              so a plan's own headings nest beneath it in the outline. */}
-          <h3 data-thread-find-text="true" className="truncate text-sm font-medium text-foreground">
-            {title}
-          </h3>
-        </div>
-        <Menu>
-          <MenuTrigger
-            render={<Button aria-label="Plan actions" size="icon-xs" variant="outline" />}
-          >
-            <EllipsisIcon aria-hidden="true" className="size-4" />
-          </MenuTrigger>
-          <MenuPopup align="end">
-            <MenuItem onClick={handleCopyPlan}>
-              {isCopied ? "Copied!" : "Copy to clipboard"}
-            </MenuItem>
-            <MenuItem onClick={handleDownload}>Download as markdown</MenuItem>
-            <MenuItem
-              onClick={openSaveDialog}
-              disabled={!canWriteFiles || !workspaceRoot || isSavingToWorkspace}
-            >
-              Save to workspace
-            </MenuItem>
-          </MenuPopup>
-        </Menu>
-      </div>
-      <div className="mt-4">
-        <div
-          ref={findRevealRef}
-          className={cn("relative", isCollapsed && "max-h-104 overflow-hidden")}
-          data-thread-find-text="true"
-          data-thread-find-fold={isCollapsed ? "" : undefined}
+    <div className="flex items-center gap-2 rounded-xl border border-border/80 bg-card/70 py-1.5 ps-3 pe-2">
+      <button
+        type="button"
+        className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md text-start outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+        aria-label={`Open plan: ${title}`}
+        disabled={onOpen === undefined}
+        onClick={onOpen}
+      >
+        <span className="shrink-0 text-xs text-muted-foreground">Created Plan</span>
+        {/* Same heading level as the message author headings in the timeline. */}
+        <h3 data-thread-find-text="true" className="truncate text-sm font-medium text-foreground">
+          {title}
+        </h3>
+        <ChevronRightIcon aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground" />
+      </button>
+      <Menu>
+        <MenuTrigger
+          render={<Button aria-label="Plan actions" size="icon-xs" variant="ghost-muted" />}
         >
-          {showPreview ? (
-            <ChatMarkdown
-              text={collapsedPreview ?? ""}
-              cwd={cwd}
-              environmentId={environmentId}
-              threadRef={threadRef}
-              isStreaming={false}
-              headingLevelOffset={3}
-            />
-          ) : (
-            <ChatMarkdown
-              text={displayedPlanMarkdown}
-              cwd={cwd}
-              environmentId={environmentId}
-              threadRef={threadRef}
-              isStreaming={false}
-              headingLevelOffset={3}
-            />
-          )}
-          {isCollapsed ? (
-            <div className="pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-linear-to-t from-card/95 via-card/80 to-transparent" />
-          ) : null}
-        </div>
-        {canCollapse ? (
-          <div className="mt-4 flex justify-center">
-            <Button
-              size="sm"
-              variant="outline"
-              data-scroll-anchor-ignore
-              onClick={() => setExpanded((value) => !value)}
-            >
-              {expanded ? "Collapse plan" : "Expand plan"}
-            </Button>
-          </div>
-        ) : null}
-      </div>
+          <EllipsisIcon aria-hidden="true" className="size-4" />
+        </MenuTrigger>
+        <MenuPopup align="end">
+          <MenuItem onClick={handleCopyPlan}>{isCopied ? "Copied!" : "Copy to clipboard"}</MenuItem>
+          <MenuItem onClick={handleDownload}>Download as markdown</MenuItem>
+          <MenuItem
+            onClick={openSaveDialog}
+            disabled={!canWriteFiles || !workspaceRoot || isSavingToWorkspace}
+          >
+            Save to workspace
+          </MenuItem>
+        </MenuPopup>
+      </Menu>
 
       <Dialog
         open={isSaveDialogOpen}

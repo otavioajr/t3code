@@ -33,6 +33,7 @@ import type {
   PreviewAnnotationPayload,
   ProviderApprovalDecision,
   ThreadContextRecord,
+  PlanId,
   ProviderInteractionMode,
   ResolvedKeybindingsConfig,
   RuntimeMode,
@@ -1098,6 +1099,7 @@ import {
   XIcon,
 } from "lucide-react";
 import { proposedPlanTitle } from "@t3tools/shared/proposedPlanText";
+import { proposedPlanSummary } from "../../proposedPlan";
 import { hasProviderSetup } from "./ProviderStatusBanner";
 import {
   applyProviderInstanceSettings,
@@ -1267,7 +1269,7 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
   const RuntimeModeIcon = runtimeModeOption.icon;
   const interactionModeTooltip =
     props.interactionMode === "plan"
-      ? "Plan mode — click to return to normal build mode"
+      ? "Plan mode — click to remove and return to build mode"
       : "Default mode — click to enter plan mode";
 
   const interactionModeToggle = props.showInteractionModeToggle ? (
@@ -1302,6 +1304,9 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
           <span data-composer-control-label className="sr-only sm:not-sr-only">
             {props.interactionMode === "plan" ? "Plan" : "Build"}
           </span>
+          {props.interactionMode === "plan" ? (
+            <XIcon aria-hidden="true" className="size-3 shrink-0 opacity-60" />
+          ) : null}
         </TooltipTrigger>
         <TooltipPopup side="top">{interactionModeTooltip}</TooltipPopup>
       </Tooltip>
@@ -1514,6 +1519,12 @@ export interface ChatComposerHandle {
     selectedProviderModels: ReadonlyArray<ServerProvider["models"][number]>;
     interactionMode: ProviderInteractionMode;
     interactionModeEnabled: boolean;
+    /** Plan mode is on for a provider without the native toggle: the app prepends its plan-first instruction. */
+    planFirst: boolean;
+    /** The built-in /plan applies: the provider has the native toggle or no /plan of its own. */
+    planCommandAvailable: boolean;
+    /** Plan mode is on, natively or as plan-first. */
+    planRequested: boolean;
   };
   /** Validate the fully composed text immediately before a provider turn starts. */
   validateProviderInput: (providerInput: string) => boolean;
@@ -1683,6 +1694,14 @@ export interface ChatComposerProps {
   onResume: () => void;
   onInterrupt: () => void;
   onImplementPlanInNewThread: () => void;
+  /** Whether the Review Plan banner is offered; independent of plan mode. */
+  showPlanReviewBanner: boolean;
+  /** Whether Build can run now. */
+  canBuildPlan: boolean;
+  /** Review Plan banner: implement the active plan in this thread. */
+  onBuildPlan: () => void;
+  /** Review Plan banner: open the plan in the right panel. */
+  onOpenPlan: (planId: PlanId) => void;
   onRespondToApproval: (
     requestId: RuntimeRequestId,
     decision: ProviderApprovalDecision,
@@ -1806,6 +1825,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     onResume,
     onInterrupt,
     onImplementPlanInNewThread,
+    showPlanReviewBanner,
+    canBuildPlan,
+    onBuildPlan,
+    onOpenPlan,
     onRespondToApproval,
     onSelectActivePendingUserInputOption,
     onAdvanceActivePendingUserInput,
@@ -2245,6 +2268,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       : (attachmentBlockReason ??
         (multipleModelSelections === null ? providerSendBlockReason : null)));
   const isSendDisabled = sendDisabledReason !== null;
+  // Hides the Review Plan banner for one plan; the plan and its Build actions stay as they were.
+  const [dismissedPlanReviewId, setDismissedPlanReviewId] = useState<PlanId | null>(null);
   const selectedProviderStatus = useMemo(
     () => selectedProviderEntry?.snapshot ?? null,
     [selectedProviderEntry],
@@ -2388,11 +2413,20 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
 
   const selectedPromptEffort = composerProviderState.promptEffort;
   const selectedModelOptionsForDispatch = composerProviderState.modelOptionsForDispatch;
-  const { enabled: planModeUiEnabled, interactionMode } = resolveComposerInteractionMode({
-    planModeEnabled: settings.planModeEnabled,
+  const {
+    enabled: planModeUiEnabled,
+    interactionMode,
+    planFirst,
+  } = resolveComposerInteractionMode({
     provider: selectedProviderStatus,
     interactionMode: requestedInteractionMode,
   });
+  // The built-in plan entry points (/plan, the footer toggle, Shift+Tab) apply to a provider with
+  // the native toggle or without a /plan of its own.
+  const planCommandAvailable =
+    selectedProviderStatus !== null &&
+    (planModeUiEnabled ||
+      !selectedProviderSlashCommands.some((command) => command.name === "plan"));
   const selectedModelSelection = useMemo<ModelSelection>(
     () => createModelSelection(selectedInstanceId, selectedModel, selectedModelOptionsForDispatch),
     [selectedInstanceId, selectedModel, selectedModelOptionsForDispatch],
@@ -2737,15 +2771,21 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           label: "/model",
           description: "Switch response model for this thread",
         },
-        ...(planModeUiEnabled
+        // A provider with its own /plan and no native toggle keeps that command instead.
+        ...(planCommandAvailable
           ? ([
               {
                 id: "slash:plan",
                 type: "slash-command",
                 command: "plan",
                 label: "/plan",
-                description: "Switch this thread into plan mode",
+                description: "Plan first, then review and build",
               },
+            ] as const)
+          : []),
+        // /default leaves plan mode; without the native toggle there is nothing else to switch.
+        ...(planModeUiEnabled || planFirst
+          ? ([
               {
                 id: "slash:default",
                 type: "slash-command",
@@ -2870,6 +2910,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     exactPullRequestLookup.data,
     linkedPullRequests,
     planModeUiEnabled,
+    planFirst,
+    planCommandAvailable,
     pullRequestLookup.data,
     pullRequestProjectId,
     pullRequestRepository,
@@ -2919,7 +2961,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const showComposerTopDrawer =
     isComposerApprovalState ||
     pendingUserInputs.length > 0 ||
-    (!isComposerCollapsedMobile && showPlanFollowUpPrompt && activeProposedPlan !== null);
+    (!isComposerCollapsedMobile && showPlanReviewBanner && activeProposedPlan !== null);
   const showCollapsedMobilePromptRow =
     isComposerCollapsedMobile && !isComposerApprovalState && pendingUserInputs.length === 0;
   const showComposerAttachAction =
@@ -4078,7 +4120,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           }
           return;
         }
-        if (!planModeUiEnabled) return;
         void handleInteractionModeChange(item.command === "plan" ? "plan" : "default");
         const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "", {
           expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
@@ -4198,7 +4239,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       attachmentDraftTarget,
       composerDraftTarget,
       handleInteractionModeChange,
-      planModeUiEnabled,
       onUsageLimitsCommand,
       resolveActiveComposerTrigger,
     ],
@@ -4535,7 +4575,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       prompt: promptRef.current,
     });
     if (key === "Tab" && event.shiftKey && submissionIntent === null) {
-      if (!planModeUiEnabled) return false;
+      if (!planCommandAvailable) return false;
       toggleInteractionMode();
       return true;
     }
@@ -5531,8 +5571,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       id: "mode",
       content: (
         <ComposerFooterModeControls
-          showInteractionModeToggle={planModeUiEnabled}
-          interactionMode={interactionMode}
+          showInteractionModeToggle={planCommandAvailable}
+          interactionMode={planFirst ? "plan" : interactionMode}
           runtimeMode={compatibleRuntimeMode}
           runtimeModeOptions={compatibleRuntimeModeOptions}
           size={composerControlsCollapsed ? "xs" : "sm"}
@@ -5695,12 +5735,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           )}
         >
           <CompactComposerControlsMenu
-            interactionMode={interactionMode}
+            interactionMode={planFirst ? "plan" : interactionMode}
             runtimeMode={compatibleRuntimeMode}
             runtimeModeOptions={compatibleRuntimeModeOptions}
             size={composerControlsCollapsed ? "xs" : "sm"}
             hidden={composerControlsHidden || hiddenRestingBlockIds.length === 0}
-            showInteractionModeToggle={planModeUiEnabled && hiddenRestingBlockIds.includes("mode")}
+            showInteractionModeToggle={
+              planCommandAvailable && hiddenRestingBlockIds.includes("mode")
+            }
             traitsMenuContent={
               hiddenRestingBlockIds.includes("traits") ? providerTraitsMenuContent : undefined
             }
@@ -6686,6 +6728,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         selectedProviderModels,
         interactionMode,
         interactionModeEnabled: planModeUiEnabled,
+        planFirst,
+        planCommandAvailable,
+        planRequested: planFirst || interactionMode === "plan",
       }),
       setMultipleModelSelections,
       validateProviderInput: (providerInput: string) => {
@@ -6744,6 +6789,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       selectedProviderModels,
       interactionMode,
       planModeUiEnabled,
+      planFirst,
+      planCommandAvailable,
       compactThreadContext,
       restoreAfterTimelineReachedEnd,
       getTimelineScrollableNode,
@@ -6916,11 +6963,18 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     onAdvance={onAdvanceActivePendingUserInput}
                     onDismiss={onDismissActivePendingUserInput}
                   />
-                ) : !isComposerCollapsedMobile && showPlanFollowUpPrompt && activeProposedPlan ? (
-                  <ComposerPlanFollowUpBanner
-                    key={activeProposedPlan.id}
-                    planTitle={proposedPlanTitle(activeProposedPlan.planMarkdown) ?? null}
-                  />
+                ) : !isComposerCollapsedMobile && showPlanReviewBanner && activeProposedPlan ? (
+                  dismissedPlanReviewId === activeProposedPlan.id ? null : (
+                    <ComposerPlanFollowUpBanner
+                      key={activeProposedPlan.id}
+                      planTitle={proposedPlanTitle(activeProposedPlan.planMarkdown) ?? null}
+                      planSummary={proposedPlanSummary(activeProposedPlan.planMarkdown)}
+                      buildDisabled={!canBuildPlan || isSendDisabled}
+                      onOpenPlan={() => onOpenPlan(activeProposedPlan.id)}
+                      onBuild={onBuildPlan}
+                      onDismiss={() => setDismissedPlanReviewId(activeProposedPlan.id)}
+                    />
+                  )
                 ) : isComposerCollapsedMobile && pendingUserInputs.length > 0 ? (
                   <div data-chat-composer-collapsed-controls="true">
                     <ComposerPendingUserInputPanel

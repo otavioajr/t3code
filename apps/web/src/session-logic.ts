@@ -25,7 +25,13 @@ import {
 import type { HtmlRenderReference } from "@t3tools/shared/htmlRender";
 import { turnItemDetailRevision } from "@t3tools/client-runtime/work-log/item-detail";
 import type { McpAppReference } from "@t3tools/shared/mcpApp";
-import { htmlRenderFromToolItem, mcpAppFromToolItem } from "@t3tools/shared/toolOutput";
+import {
+  compactDynamicToolOutput,
+  htmlRenderFromToolItem,
+  mcpAppFromToolItem,
+} from "@t3tools/shared/toolOutput";
+import { CREATE_PLAN_TOOL_NAME } from "@t3tools/shared/createPlan";
+import { resolveT3McpToolId } from "@t3tools/shared/t3McpToolPresentation";
 import {
   contextCompactionLabel,
   workEntryIndicatesToolFailure,
@@ -320,6 +326,16 @@ export function findLatestProposedPlan(
     )
     .at(-1);
   return plan === undefined ? null : toLatestProposedPlanState(projection, plan);
+}
+
+/** A `create_plan` call that succeeded: the server turned it into a proposed plan. */
+export function isCompletedCreatePlanCall(item: OrchestrationV2TurnItem): boolean {
+  return (
+    item.type === "dynamic_tool" &&
+    item.status === "completed" &&
+    resolveT3McpToolId(item.toolName) === CREATE_PLAN_TOOL_NAME &&
+    !compactDynamicToolOutput(item.output)?.isError
+  );
 }
 
 export function hasActionableProposedPlan(plan: LatestProposedPlanState | null): boolean {
@@ -713,6 +729,9 @@ export function deriveTimelineEntriesFromVisibleTurnItems(
       });
       continue;
     }
+
+    // The proposed-plan card stands in for a create_plan call that went through.
+    if (isCompletedCreatePlanCall(item)) continue;
 
     const htmlRender =
       item.type === "dynamic_tool" && item.status === "completed"

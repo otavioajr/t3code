@@ -1369,6 +1369,25 @@ describe("HTML renders in the timeline", () => {
     expect(entries.some((entry) => entry.kind === "html-render")).toBe(false);
     expect(entries.find((entry) => entry.id === "render")?.kind).toBe("work");
   });
+  it("drops a successful create_plan call, since the plan card stands in for it", () => {
+    const planCall = (
+      status: OrchestrationV2TurnItem["status"],
+      output?: unknown,
+    ): OrchestrationV2TurnItem => ({
+      ...base("render", 2),
+      status,
+      type: "dynamic_tool",
+      toolName: "mcp__t3-code__create_plan",
+      input: { title: "Plan", markdown: "# Plan" },
+      ...(output === undefined ? {} : { output }),
+    });
+    const kindOfCall = (call: OrchestrationV2TurnItem) =>
+      turn(call).find((entry) => entry.id === "render")?.kind;
+    expect(kindOfCall(planCall("completed", { content: [] }))).toBeUndefined();
+    expect(kindOfCall(planCall("running"))).toBe("work");
+    expect(kindOfCall(planCall("failed", { content: [], isError: true }))).toBe("work");
+    expect(kindOfCall(planCall("completed", { content: [], isError: true }))).toBe("work");
+  });
 });
 
 describe("work-log failure policy (#7999/#7893)", () => {

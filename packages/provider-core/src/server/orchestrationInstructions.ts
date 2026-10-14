@@ -34,6 +34,10 @@ ACP fallback: some ACP agents accept the injected MCP server but fail to expose 
 ### Showing visuals
 
 When a chart, table, diagram, image collage, or mockup would say more than prose, build a self-contained HTML page, check it with \`html_preview\`, then publish it with \`html_render\` before your final reply. The reader sees the page above that reply, so don't announce or restate it; add only what it doesn't say.
+
+### Planning first
+
+When the user wants to plan, design, or think through an approach before implementing (in any language, e.g. "vamos planejar", "quero planejar", "plan first", "antes de implementar", "me ajuda a pensar na abordagem"), or asks to see a plan, you MUST deliver the plan by calling the T3 \`create_plan\` tool. Never write the plan as a chat reply. Investigate read-only first, do not edit files, call \`create_plan\` once with the full plan, then reply with at most one or two sentences. Exception: in plan mode, if your harness has its own way to present a plan, use that.
 `;
 
 export const T3_CODE_BROWSER_TOOL_INSTRUCTIONS = `

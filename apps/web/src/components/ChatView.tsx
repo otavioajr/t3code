@@ -11,6 +11,7 @@ import {
 import * as DateTime from "effect/DateTime";
 import { restorePlanFollowUpComposer } from "./ChatView.logic";
 import { assistantCitationsToPlainText } from "@t3tools/shared/assistantCitations";
+import { proposedPlanTitle } from "@t3tools/shared/proposedPlanText";
 import { prepareQueuedEditAttachments, recoverQueuedMessageEdit } from "./chat/queuedMessageEdit";
 import {
   isPaintOnlyThreadTimeline,
@@ -64,6 +65,7 @@ import {
   type EnvironmentId,
   type MessageId,
   type ModelSelection,
+  type PlanId,
   type ProjectScript,
   type ProjectId,
   type ProviderApprovalDecision,
@@ -226,7 +228,9 @@ import { useUiStateStore } from "../uiStateStore";
 import { useWorkspaceMutationRefresh } from "../hooks/useWorkspaceMutationRefresh";
 import {
   buildPlanImplementationThreadTitle,
+  buildPlanFirstPrompt,
   buildPlanImplementationPrompt,
+  buildPlanSubagentBuildPrompt,
   resolvePlanFollowUpSubmission,
 } from "../proposedPlan";
 import {
@@ -254,6 +258,7 @@ import {
 } from "../rightPanelLayout";
 import { PopoverCreateHandle } from "./ui/popover";
 import {
+  planSurface,
   pullRequestSurface,
   selectActiveRightPanel,
   selectActiveRightPanelSurface,
@@ -441,6 +446,7 @@ import {
 } from "../state/entities";
 import { environmentShell } from "../state/shell";
 import { ChatComposer, type ChatComposerHandle } from "./chat/ChatComposer";
+import { PlanPanel, type PlanBuildChoice, type PlanPanelModelPickerInput } from "./chat/PlanPanel";
 import { createPageScrollController, type PageScrollKey } from "./chat/pageScrollController";
 import { isTimelineScrollTarget } from "./chat/timelineScrollTarget";
 import { DraftHeroHeadline } from "./chat/DraftHeroHeadline";
@@ -3260,7 +3266,7 @@ export default function ChatView(props: ChatViewProps) {
       ),
     [providerStatuses, settings, activeProject?.id],
   );
-  const { selectedProviderEntry, requestedDriverKind } = useMemo(
+  const { selectedProviderEntry, requestedDriverKind, lockedContinuationGroupKey } = useMemo(
     () =>
       resolveComposerProviderSelection({
         entries: providerInstanceEntries,
@@ -3286,8 +3292,11 @@ export default function ChatView(props: ChatViewProps) {
   const selectedProvider = selectedProviderEntry?.driverKind ?? requestedDriverKind;
   const activeProviderInstanceId = selectedProviderEntry?.instanceId ?? null;
   const activeProviderStatus = selectedProviderEntry?.snapshot ?? null;
-  const { enabled: interactionModeEnabled, interactionMode } = resolveComposerInteractionMode({
-    planModeEnabled: settings.planModeEnabled,
+  const {
+    enabled: interactionModeEnabled,
+    interactionMode,
+    planFirst,
+  } = resolveComposerInteractionMode({
     provider: activeProviderStatus,
     interactionMode:
       composerInteractionMode ?? activeThread?.interactionMode ?? DEFAULT_INTERACTION_MODE,
@@ -3479,6 +3488,63 @@ export default function ChatView(props: ChatViewProps) {
     hasActionableProposedPlan: hasActionableProposedPlan(activeProposedPlan),
     hasComposerAttachments: composerHasAttachments,
   });
+  const planTitlesById = useMemo(() => {
+    const titles = new Map<string, string>();
+    for (const surface of renderedRightPanelSurfaces) {
+      if (surface.kind !== "plan") continue;
+      const plan = serverProjection?.plans.find(
+        (candidate) => candidate.kind === "proposed_plan" && candidate.id === surface.planId,
+      );
+      const title = plan?.kind === "proposed_plan" ? proposedPlanTitle(plan.markdown) : null;
+      if (title) titles.set(surface.planId, title);
+    }
+    return titles;
+  }, [renderedRightPanelSurfaces, serverProjection]);
+  // A plan that arrives while the thread is open opens its tab once. Plans already in the
+  // thread when it is first observed, and any plan seen before, never open it again, so a tab
+  // the user closed stays closed.
+  const observedProposedPlansRef = useRef<{ threadKey: string; ids: Set<PlanId> } | null>(null);
+  useEffect(() => {
+    if (!activeThreadRef || activeThreadKey === null || !isServerThread) return;
+    if (serverProjection === null || threadDetailLoading || !clientSettingsHydrated) return;
+    const observed = observedProposedPlansRef.current;
+    if (observed?.threadKey !== activeThreadKey) {
+      observedProposedPlansRef.current = {
+        threadKey: activeThreadKey,
+        ids: new Set(
+          serverProjection.plans.flatMap((plan) =>
+            plan.kind === "proposed_plan" ? [plan.id] : [],
+          ),
+        ),
+      };
+      return;
+    }
+    if (activeProposedPlan === null || observed.ids.has(activeProposedPlan.id)) return;
+    observed.ids.add(activeProposedPlan.id);
+    if (
+      !hasActionableProposedPlan(activeProposedPlan) ||
+      !settings.proactivePanelsEnabled ||
+      shouldUsePlanSidebarSheet
+    ) {
+      return;
+    }
+    const panels = useRightPanelStore.getState();
+    panels.openProactive(
+      activeThreadRef,
+      planSurface(activeProposedPlan.id),
+      panels.getUserActionRevision(activeThreadRef),
+    );
+  }, [
+    activeProposedPlan,
+    activeThreadKey,
+    activeThreadRef,
+    clientSettingsHydrated,
+    isServerThread,
+    serverProjection,
+    settings.proactivePanelsEnabled,
+    shouldUsePlanSidebarSheet,
+    threadDetailLoading,
+  ]);
   const activePendingApproval = pendingApprovals[0] ?? null;
   // The open /usage-limits panel for this thread, model and turn. Only the open
   // moment is stored: the rows read live provider data, so a redeemed reset
@@ -3602,6 +3668,26 @@ export default function ChatView(props: ChatViewProps) {
     activePendingUserInput: activePendingUserInput?.requestId ?? null,
     threadError,
   });
+  // The Build actions of a plan tab apply to the thread's current plan while it is actionable.
+  // Mirrors what the Build handlers require, so a button is never enabled for a silent no-op.
+  const canBuildActivePlan =
+    activeProposedPlan !== null &&
+    hasActionableProposedPlan(activeProposedPlan) &&
+    pendingUserInputs.length === 0 &&
+    canOperateThread &&
+    isServerThread &&
+    activeProject !== null &&
+    selectedProviderEntry !== undefined &&
+    !activeEnvironmentUnavailable &&
+    !isSendBusy &&
+    !isConnecting;
+  // Review Plan is offered for any actionable plan, with or without the plan-mode toggle.
+  const showPlanReviewBanner =
+    showPlanFollowUpPrompt ||
+    (activeProposedPlan !== null &&
+      hasActionableProposedPlan(activeProposedPlan) &&
+      pendingUserInputs.length === 0 &&
+      !composerHasAttachments);
   const optimisticCompactionMessage = optimisticUserMessages.at(-1);
   const latestServerUserItem = serverVisibleTurnItems.findLast(
     (row) => row.item.type === "user_message",
@@ -5407,10 +5493,11 @@ export default function ChatView(props: ChatViewProps) {
 
   const handleInteractionModeChange = useCallback(
     (mode: ProviderInteractionMode) => {
-      if (mode === "plan" && !interactionModeEnabled) return;
-      if (mode === interactionMode) return;
+      // Without the native toggle "plan" only marks the draft plan-first, so it is the draft's
+      // alone and never reaches the thread's interaction mode.
+      if (mode === (planFirst ? "plan" : interactionMode)) return;
       setComposerDraftInteractionMode(composerDraftTarget, mode);
-      if (isLocalDraftThread) {
+      if (isLocalDraftThread && interactionModeEnabled) {
         setDraftThreadContext(composerDraftTarget, { interactionMode: mode });
       }
       scheduleComposerFocus();
@@ -5418,6 +5505,7 @@ export default function ChatView(props: ChatViewProps) {
     [
       interactionMode,
       interactionModeEnabled,
+      planFirst,
       isLocalDraftThread,
       scheduleComposerFocus,
       composerDraftTarget,
@@ -5426,9 +5514,8 @@ export default function ChatView(props: ChatViewProps) {
     ],
   );
   const toggleInteractionMode = useCallback(() => {
-    if (!interactionModeEnabled) return;
-    handleInteractionModeChange(interactionMode === "plan" ? "default" : "plan");
-  }, [handleInteractionModeChange, interactionMode, interactionModeEnabled]);
+    handleInteractionModeChange(interactionMode === "plan" || planFirst ? "default" : "plan");
+  }, [handleInteractionModeChange, interactionMode, planFirst]);
   const openProviderSetup = useCallback(
     (instanceId: ProviderInstanceId) => {
       void navigate({
@@ -8955,6 +9042,9 @@ export default function ChatView(props: ChatViewProps) {
       selectedModelSelection: ctxSelectedModelSelection,
       interactionMode: sendInteractionMode,
       interactionModeEnabled: sendInteractionModeEnabled,
+      planFirst: sendPlanFirst,
+      planCommandAvailable: sendPlanCommandAvailable,
+      planRequested: sendPlanRequested,
     } = sendCtx;
     const annotationImageAlreadyAttached =
       directAnnotation?.image !== undefined &&
@@ -9264,9 +9354,9 @@ export default function ChatView(props: ChatViewProps) {
       }
       return;
     }
-    // Providers without the legacy toggle receive their native commands unchanged.
+    // /plan and /default are T3 commands for every provider.
     const standaloneSlashCommand =
-      sendInteractionModeEnabled &&
+      sendPlanCommandAvailable &&
       composerImages.length === 0 &&
       composerFiles.length === 0 &&
       sendableComposerTerminalContexts.length === 0 &&
@@ -9376,7 +9466,9 @@ export default function ChatView(props: ChatViewProps) {
       model: ctxSelectedModel,
       models: ctxSelectedProviderModels,
       effort: ctxSelectedPromptEffort,
-      text: messageTextForSend || ATTACHMENT_ONLY_BOOTSTRAP_PROMPT,
+      text: sendPlanFirst
+        ? buildPlanFirstPrompt(messageTextForSend || ATTACHMENT_ONLY_BOOTSTRAP_PROMPT)
+        : messageTextForSend || ATTACHMENT_ONLY_BOOTSTRAP_PROMPT,
     });
     if (composerRef.current?.validateProviderInput(outgoingMessageText) === false) {
       return;
@@ -9420,12 +9512,18 @@ export default function ChatView(props: ChatViewProps) {
         promptInjectionState: getComposerPromptInjectionState(messageTextForSend),
         planModeEnabled: settings.planModeEnabled,
       });
+      const targetMode = resolveComposerInteractionMode({
+        provider: provider.snapshot,
+        interactionMode: sendPlanRequested ? "plan" : "default",
+      });
       const text = formatOutgoingPrompt({
         provider: provider.driverKind,
         model: selection.model,
         models: provider.models,
         effort: providerState.promptEffort,
-        text: messageTextForSend || ATTACHMENT_ONLY_BOOTSTRAP_PROMPT,
+        text: targetMode.planFirst
+          ? buildPlanFirstPrompt(messageTextForSend || ATTACHMENT_ONLY_BOOTSTRAP_PROMPT)
+          : messageTextForSend || ATTACHMENT_ONLY_BOOTSTRAP_PROMPT,
       });
       if (composerRef.current?.validateProviderInput(text) === false) return;
       multipleTargets.push({
@@ -9435,11 +9533,7 @@ export default function ChatView(props: ChatViewProps) {
           providerState.modelOptionsForDispatch,
         ),
         text,
-        interactionMode: resolveComposerInteractionMode({
-          planModeEnabled: settings.planModeEnabled,
-          provider: provider.snapshot,
-          interactionMode: sendInteractionMode,
-        }).interactionMode,
+        interactionMode: targetMode.interactionMode,
       });
     }
 
@@ -10489,10 +10583,13 @@ export default function ChatView(props: ChatViewProps) {
     text,
     context,
     interactionMode: nextInteractionMode,
+    modelSelection: modelSelectionOverride,
   }: {
     text: string;
     context?: ReturnType<typeof buildMessageContext>;
     interactionMode: "default" | "plan";
+    /** Runs the turn on this model instead of the composer's. */
+    modelSelection?: ModelSelection;
   }) {
     if (
       !readEnvironmentScope(environmentId, AuthOrchestrationOperateScope) ||
@@ -10511,7 +10608,11 @@ export default function ChatView(props: ChatViewProps) {
     }
 
     const sendCtx = composerRef.current?.getSendContext();
-    if (!sendCtx?.providerAvailable || !sendCtx.interactionModeEnabled) {
+    // Only refining a plan needs plan mode; building one is an ordinary default turn.
+    if (
+      !sendCtx?.providerAvailable ||
+      (nextInteractionMode === "plan" && !sendCtx.interactionModeEnabled)
+    ) {
       return false;
     }
     const {
@@ -10594,7 +10695,7 @@ export default function ChatView(props: ChatViewProps) {
             ...(context ? { context } : {}),
             attachments: [],
           },
-          modelSelection: ctxSelectedModelSelection,
+          modelSelection: modelSelectionOverride ?? ctxSelectedModelSelection,
           titleSeed: activeThread.title,
           runtimeMode,
           interactionMode: nextInteractionMode,
@@ -10633,163 +10734,197 @@ export default function ChatView(props: ChatViewProps) {
     return false;
   }
 
-  const onImplementPlanInNewThread = useCallback(async () => {
-    if (
-      !readEnvironmentScope(environmentId, AuthOrchestrationOperateScope) ||
-      !activeThread ||
-      !activeProject ||
-      !activeProposedPlan ||
-      !isServerThread ||
-      isSendBusy ||
-      isConnecting ||
-      activeEnvironmentUnavailable ||
-      sendInFlightRef.current
-    ) {
-      return;
-    }
+  const onImplementPlanInNewThread = useCallback(
+    async (modelSelectionOverride?: ModelSelection) => {
+      if (
+        !readEnvironmentScope(environmentId, AuthOrchestrationOperateScope) ||
+        !activeThread ||
+        !activeProject ||
+        !activeProposedPlan ||
+        !isServerThread ||
+        isSendBusy ||
+        isConnecting ||
+        activeEnvironmentUnavailable ||
+        sendInFlightRef.current
+      ) {
+        return;
+      }
 
-    const sendCtx = composerRef.current?.getSendContext();
-    if (!sendCtx?.providerAvailable || !sendCtx.interactionModeEnabled) {
-      return;
-    }
-    const {
-      selectedProvider: ctxSelectedProvider,
-      selectedModel: ctxSelectedModel,
-      selectedProviderModels: ctxSelectedProviderModels,
-      selectedPromptEffort: ctxSelectedPromptEffort,
-      selectedModelSelection: ctxSelectedModelSelection,
-    } = sendCtx;
+      const sendCtx = composerRef.current?.getSendContext();
+      // The new thread runs a default turn, so the plan-mode toggle does not matter here.
+      if (!sendCtx?.providerAvailable) {
+        return;
+      }
+      const {
+        selectedProvider: ctxSelectedProvider,
+        selectedModel: ctxSelectedModel,
+        selectedProviderModels: ctxSelectedProviderModels,
+        selectedPromptEffort: ctxSelectedPromptEffort,
+        selectedModelSelection: ctxSelectedModelSelection,
+      } = sendCtx;
 
-    const createdAt = new Date().toISOString();
-    const nextThreadId = newThreadId();
-    const planMarkdown = activeProposedPlan.planMarkdown;
-    const implementationPrompt = buildPlanImplementationPrompt(planMarkdown);
-    const outgoingImplementationPrompt = formatOutgoingPrompt({
-      provider: ctxSelectedProvider,
-      model: ctxSelectedModel,
-      models: ctxSelectedProviderModels,
-      effort: ctxSelectedPromptEffort,
-      text: implementationPrompt,
-    });
-    const nextThreadTitle = truncate(buildPlanImplementationThreadTitle(planMarkdown));
-    const nextThreadModelSelection: ModelSelection = ctxSelectedModelSelection;
+      const createdAt = new Date().toISOString();
+      const nextThreadId = newThreadId();
+      const planMarkdown = activeProposedPlan.planMarkdown;
+      const implementationPrompt = buildPlanImplementationPrompt(planMarkdown);
+      const outgoingImplementationPrompt = formatOutgoingPrompt({
+        provider: ctxSelectedProvider,
+        model: ctxSelectedModel,
+        models: ctxSelectedProviderModels,
+        effort: ctxSelectedPromptEffort,
+        text: implementationPrompt,
+      });
+      const nextThreadTitle = truncate(buildPlanImplementationThreadTitle(planMarkdown));
+      const nextThreadModelSelection: ModelSelection =
+        modelSelectionOverride ?? ctxSelectedModelSelection;
 
-    sendInFlightRef.current = true;
-    beginLocalDispatch({ preparingWorktree: false });
-    const finish = () => {
-      sendInFlightRef.current = false;
-      resetLocalDispatch();
-    };
+      sendInFlightRef.current = true;
+      beginLocalDispatch({ preparingWorktree: false });
+      const finish = () => {
+        sendInFlightRef.current = false;
+        resetLocalDispatch();
+      };
 
-    const createResult = await createThread({
-      environmentId,
-      input: {
-        threadId: nextThreadId,
-        projectId: activeProject.id,
-        title: nextThreadTitle,
-        modelSelection: nextThreadModelSelection,
-        runtimeMode: defaultRuntimeMode,
-        interactionMode: "default",
-        branch: activeThreadBranch,
-        worktreePath: activeThread.worktreePath,
-        createdAt,
-      },
-    });
-    let failure: AtomCommandResult<unknown, unknown> | null =
-      createResult._tag === "Failure" ? createResult : null;
-
-    if (failure === null) {
-      const startResult = await startThreadTurn({
+      const createResult = await createThread({
         environmentId,
         input: {
           threadId: nextThreadId,
-          message: {
-            messageId: newMessageId(),
-            role: "user",
-            text: outgoingImplementationPrompt,
-            attachments: [],
-          },
-          modelSelection: ctxSelectedModelSelection,
-          titleSeed: nextThreadTitle,
+          projectId: activeProject.id,
+          title: nextThreadTitle,
+          modelSelection: nextThreadModelSelection,
           runtimeMode: defaultRuntimeMode,
           interactionMode: "default",
-          sourceProposedPlan: {
-            threadId: activeThread.id,
-            planId: activeProposedPlan.id,
-          },
+          branch: activeThreadBranch,
+          worktreePath: activeThread.worktreePath,
           createdAt,
         },
       });
-      failure = startResult._tag === "Failure" ? startResult : null;
-    }
+      let failure: AtomCommandResult<unknown, unknown> | null =
+        createResult._tag === "Failure" ? createResult : null;
 
-    if (failure === null) {
-      const startedResult = await settlePromise(() =>
-        waitForStartedServerThread(scopeThreadRef(activeThread.environmentId, nextThreadId)),
-      );
-      failure = startedResult._tag === "Failure" ? startedResult : null;
-    }
-
-    if (failure === null) {
-      const navigateResult = await settlePromise(() =>
-        navigate({
-          to: "/$environmentId/$threadId",
-          params: {
-            environmentId: activeThread.environmentId,
+      if (failure === null) {
+        const startResult = await startThreadTurn({
+          environmentId,
+          input: {
             threadId: nextThreadId,
+            message: {
+              messageId: newMessageId(),
+              role: "user",
+              text: outgoingImplementationPrompt,
+              attachments: [],
+            },
+            modelSelection: nextThreadModelSelection,
+            titleSeed: nextThreadTitle,
+            runtimeMode: defaultRuntimeMode,
+            interactionMode: "default",
+            sourceProposedPlan: {
+              threadId: activeThread.id,
+              planId: activeProposedPlan.id,
+            },
+            createdAt,
           },
-        }),
-      );
-      failure = navigateResult._tag === "Failure" ? navigateResult : null;
-    }
-
-    if (failure !== null) {
-      const cleanupResult = await deleteThread({
-        environmentId,
-        input: {
-          threadId: nextThreadId,
-        },
-      });
-      if (cleanupResult._tag === "Failure" && !isAtomCommandInterrupted(cleanupResult)) {
-        console.warn(
-          "Failed to clean up implementation thread after start failure.",
-          squashAtomCommandFailure(cleanupResult),
-        );
+        });
+        failure = startResult._tag === "Failure" ? startResult : null;
       }
-      if (!isAtomCommandInterrupted(failure)) {
-        const error = squashAtomCommandFailure(failure);
-        toastManager.add(
-          stackedThreadToast({
-            type: "error",
-            title: "Could not start implementation thread",
-            description:
-              error instanceof Error
-                ? error.message
-                : "An error occurred while creating the new thread.",
+
+      if (failure === null) {
+        const startedResult = await settlePromise(() =>
+          waitForStartedServerThread(scopeThreadRef(activeThread.environmentId, nextThreadId)),
+        );
+        failure = startedResult._tag === "Failure" ? startedResult : null;
+      }
+
+      if (failure === null) {
+        const navigateResult = await settlePromise(() =>
+          navigate({
+            to: "/$environmentId/$threadId",
+            params: {
+              environmentId: activeThread.environmentId,
+              threadId: nextThreadId,
+            },
           }),
         );
+        failure = navigateResult._tag === "Failure" ? navigateResult : null;
       }
-    }
-    finish();
-  }, [
-    activeProject,
-    activeProposedPlan,
-    activeThreadBranch,
-    activeThread,
-    beginLocalDispatch,
-    activeEnvironmentUnavailable,
-    createThread,
-    deleteThread,
-    isConnecting,
-    isSendBusy,
-    isServerThread,
-    navigate,
-    resetLocalDispatch,
-    defaultRuntimeMode,
-    startThreadTurn,
-    environmentId,
-    composerRef,
-  ]);
+
+      if (failure !== null) {
+        const cleanupResult = await deleteThread({
+          environmentId,
+          input: {
+            threadId: nextThreadId,
+          },
+        });
+        if (cleanupResult._tag === "Failure" && !isAtomCommandInterrupted(cleanupResult)) {
+          console.warn(
+            "Failed to clean up implementation thread after start failure.",
+            squashAtomCommandFailure(cleanupResult),
+          );
+        }
+        if (!isAtomCommandInterrupted(failure)) {
+          const error = squashAtomCommandFailure(failure);
+          toastManager.add(
+            stackedThreadToast({
+              type: "error",
+              title: "Could not start implementation thread",
+              description:
+                error instanceof Error
+                  ? error.message
+                  : "An error occurred while creating the new thread.",
+            }),
+          );
+        }
+      }
+      finish();
+    },
+    [
+      activeProject,
+      activeProposedPlan,
+      activeThreadBranch,
+      activeThread,
+      beginLocalDispatch,
+      activeEnvironmentUnavailable,
+      createThread,
+      deleteThread,
+      isConnecting,
+      isSendBusy,
+      isServerThread,
+      navigate,
+      resetLocalDispatch,
+      defaultRuntimeMode,
+      startThreadTurn,
+      environmentId,
+      composerRef,
+    ],
+  );
+  // The same implementation prompt and mode switch the composer's Implement button sends.
+  // Runs on the composer's model: the main agent delegates to a subagent on the panel's pick (or
+  // on its own model when nothing was picked) and reviews the result.
+  const onBuildPlanWithSubagent = (choice: PlanBuildChoice | undefined) => {
+    if (!activeProposedPlan || !canBuildActivePlan) return;
+    const target =
+      toPlanBuildModelSelection(choice) ??
+      composerRef.current?.getSendContext().selectedModelSelection;
+    if (!target) return;
+    void onSubmitPlanFollowUp({
+      text: buildPlanSubagentBuildPrompt({
+        planMarkdown: activeProposedPlan.planMarkdown,
+        target: {
+          providerInstanceId: target.instanceId,
+          model: target.model,
+          options: target.options,
+        },
+      }),
+      interactionMode: "default",
+    });
+  };
+  const onBuildPlan = (modelSelection?: ModelSelection) => {
+    if (!activeProposedPlan || !canBuildActivePlan) return;
+    void onSubmitPlanFollowUp({
+      text: buildPlanImplementationPrompt(activeProposedPlan.planMarkdown),
+      interactionMode: "default",
+      ...(modelSelection ? { modelSelection } : {}),
+    });
+  };
 
   const getModelDisabledReason = useCallback(
     (instanceId: ProviderInstanceId, model: string): string | null => {
@@ -10901,6 +11036,66 @@ export default function ChatView(props: ChatViewProps) {
       providerStatuses,
       settings,
     ],
+  );
+  const activeThreadModelSelection = activeThread?.modelSelection;
+  const planPanelModelPicker = useMemo<PlanPanelModelPickerInput>(
+    () => ({
+      environmentId,
+      composerDraftTarget,
+      providers: providerStatuses,
+      settings,
+      instanceEntries: providerInstanceEntries,
+      selectedInstanceId: activeProviderInstanceId,
+      selectedProvider,
+      threadModelSelection: activeThreadModelSelection,
+      projectModelSelection: activeProjectDefaultModelSelection,
+      lockedProvider: modelPickerLockedProvider,
+      lockedContinuationGroupKey,
+      keybindings,
+      disabled: isSendBusy,
+      getModelDisabledReason,
+      onOpenProviderSetup: openProviderSetup,
+    }),
+    [
+      activeProjectDefaultModelSelection,
+      activeProviderInstanceId,
+      activeThreadModelSelection,
+      composerDraftTarget,
+      environmentId,
+      getModelDisabledReason,
+      isSendBusy,
+      keybindings,
+      lockedContinuationGroupKey,
+      modelPickerLockedProvider,
+      openProviderSetup,
+      providerInstanceEntries,
+      providerStatuses,
+      selectedProvider,
+      settings,
+    ],
+  );
+  // The panel's pick as a ModelSelection with its own trait options. Undefined keeps the
+  // composer's own model.
+  const toPlanBuildModelSelection = (
+    choice: PlanBuildChoice | undefined,
+  ): ModelSelection | undefined => {
+    if (!choice) return undefined;
+    const model = resolveAppModelSelectionForInstance(
+      choice.instanceId,
+      settings,
+      providerStatuses,
+      choice.model,
+    );
+    if (!model) return undefined;
+    return choice.options !== undefined && choice.options.length > 0
+      ? { instanceId: choice.instanceId, model, options: [...choice.options] }
+      : { instanceId: choice.instanceId, model };
+  };
+  const onOpenPlan = useCallback(
+    (planId: PlanId) => {
+      if (activeThreadRef) useRightPanelStore.getState().openPlan(activeThreadRef, planId);
+    },
+    [activeThreadRef],
   );
   const onEnvModeChange = useCallback(
     (mode: DraftThreadEnvMode) => {
@@ -11122,6 +11317,15 @@ export default function ChatView(props: ChatViewProps) {
     return <NoActiveThreadState />;
   }
 
+  const renderedPlan =
+    renderedRightPanelSurface?.kind === "plan"
+      ? serverProjection?.plans.find(
+          (plan) => plan.kind === "proposed_plan" && plan.id === renderedRightPanelSurface.planId,
+        )
+      : undefined;
+  const renderedPlanMarkdown =
+    renderedPlan?.kind === "proposed_plan" ? renderedPlan.markdown : null;
+
   const rightPanelContent = activeThreadRef ? (
     renderedRightPanelSurface?.kind === "preview" ? (
       <Suspense fallback={null}>
@@ -11219,6 +11423,23 @@ export default function ChatView(props: ChatViewProps) {
       />
     ) : renderedRightPanelSurface?.kind === "pull-requests" && activeThreadRef ? (
       <ThreadPullRequestsPanel threadRef={activeThreadRef} />
+    ) : renderedRightPanelSurface?.kind === "plan" ? (
+      <PlanPanel
+        key={renderedRightPanelSurface.id}
+        planMarkdown={renderedPlanMarkdown}
+        environmentId={activeThread.environmentId}
+        threadRef={activeThreadRef}
+        cwd={gitCwd ?? undefined}
+        buildDisabled={
+          !canBuildActivePlan || activeProposedPlan?.id !== renderedRightPanelSurface.planId
+        }
+        onBuild={(choice) => onBuildPlan(toPlanBuildModelSelection(choice))}
+        onBuildWithSubagent={onBuildPlanWithSubagent}
+        onBuildInNewThread={(choice) =>
+          void onImplementPlanInNewThread(toPlanBuildModelSelection(choice))
+        }
+        modelPicker={planPanelModelPicker}
+      />
     ) : renderedRightPanelSurface?.kind === "device" ? (
       <Suspense fallback={null}>
         <DevicePanel
@@ -11609,6 +11830,7 @@ export default function ChatView(props: ChatViewProps) {
                 displayThreadKey={displayedTimelineKey}
                 paintOnly={paintOnlyDisplayedTimeline}
                 onOpenTurnDiff={paintOnlyDisplayedTimeline ? noopHeldTurnDiff : onOpenTurnDiff}
+                onOpenPlan={paintOnlyDisplayedTimeline ? undefined : onOpenPlan}
                 onOpenThread={onOpenRelatedThread}
                 parentThreadLink={paintOnlyDisplayedTimeline ? null : parentThreadLink}
                 onForkFromRun={paintOnlyDisplayedTimeline ? async () => {} : onForkFromRun}
@@ -11847,7 +12069,7 @@ export default function ChatView(props: ChatViewProps) {
                                 activeEnvironmentUnavailable ? null : threadSyncPhase
                               }
                               runtimeMode={runtimeMode}
-                              interactionMode={interactionMode}
+                              interactionMode={planFirst ? "plan" : interactionMode}
                               lockedProvider={modelPickerLockedProvider}
                               providerStatuses={providerStatuses as ServerProvider[]}
                               providerCatalogKnown={serverConfig !== null}
@@ -11897,6 +12119,10 @@ export default function ChatView(props: ChatViewProps) {
                               onResume={onComposerResume}
                               onInterrupt={onInterrupt}
                               onImplementPlanInNewThread={onImplementPlanInNewThread}
+                              showPlanReviewBanner={showPlanReviewBanner}
+                              canBuildPlan={canBuildActivePlan}
+                              onBuildPlan={() => onBuildPlan()}
+                              onOpenPlan={onOpenPlan}
                               onRespondToApproval={onRespondToApproval}
                               onSelectActivePendingUserInputOption={
                                 onSelectActivePendingUserInputOption
@@ -12105,6 +12331,7 @@ export default function ChatView(props: ChatViewProps) {
           desktopByTabId={activePreviewState.desktopByTabId}
           previewRuntimeTabId={resolvePreviewRuntimeTabId}
           terminalLabelsById={activeTerminalLabelsById}
+          planTitlesById={planTitlesById}
           onActivate={activateRightPanelSurface}
           onCloseSurface={closeRightPanelSurface}
           onRenameDevice={(surfaceId, title) => {
@@ -12164,6 +12391,7 @@ export default function ChatView(props: ChatViewProps) {
             desktopByTabId={activePreviewState.desktopByTabId}
             previewRuntimeTabId={resolvePreviewRuntimeTabId}
             terminalLabelsById={activeTerminalLabelsById}
+            planTitlesById={planTitlesById}
             onActivate={activateRightPanelSurface}
             onCloseSurface={closeRightPanelSurface}
             onRenameDevice={(surfaceId, title) => {

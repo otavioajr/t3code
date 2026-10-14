@@ -232,6 +232,16 @@ Provider commands must start the message to run. T3 Code commands such as
 Send `/compact` in an existing conversation to reduce context usage when the
 provider supports it. Web and desktop also offer compaction from the context meter.
 
+## Plan mode
+
+Send `/plan` (or press **Shift+Tab**) to ask the agent for a plan before it changes anything. The
+plan appears in the conversation as a **Created Plan** card. Open it to read the plan in the right
+panel, then choose **Build** to implement it in this thread or in a new thread, optionally with a
+different model. **Build with subagent** keeps the main agent on its own model: it delegates the build to a T3
+subagent on the model chosen in the panel, then reviews the result. **Review Plan** above the
+composer offers the same Build action. Use `/default` to
+leave plan mode.
+
 ## Goals
 
 With Codex and Claude, send `/goal` followed by what "done" means, for example

@@ -1,5 +1,5 @@
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { type EnvironmentId, ThreadId } from "@t3tools/contracts";
+import { type EnvironmentId, PlanId, ThreadId } from "@t3tools/contracts";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
 import { useClosedViewStore } from "./closedViewStore";
@@ -552,6 +552,64 @@ describe("rightPanelStore", () => {
       },
       threadPanelVisibilityByThreadKey: {},
     });
+  });
+
+  it("keeps keyed plan surfaces through migration and drops the pre-v9 shape", () => {
+    const planId = PlanId.make("plan-1");
+    expect(
+      migratePersistedRightPanelState({
+        byThreadKey: {
+          "env-1:thread-A": {
+            isOpen: true,
+            activeSurfaceId: "plan:plan-1",
+            surfaces: [
+              { id: "plan", kind: "plan" },
+              { id: "plan:plan-1", kind: "plan", planId },
+              { id: "plan:other", kind: "plan", planId },
+            ],
+          },
+        },
+      }).byThreadKey["env-1:thread-A"],
+    ).toEqual({
+      isOpen: true,
+      activeSurfaceId: "plan:plan-1",
+      surfaces: [{ id: "plan:plan-1", kind: "plan", planId }],
+    });
+  });
+
+  it("opens a plan as one tab per plan id and closes it like any other tab", () => {
+    const store = useRightPanelStore.getState();
+    const first = PlanId.make("plan-1");
+    const second = PlanId.make("plan-2");
+    store.openPlan(refA, first);
+    store.openPlan(refA, second);
+    store.openPlan(refA, first);
+    const state = selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA);
+    expect(state.surfaces.map((surface) => surface.id)).toEqual(["plan:plan-1", "plan:plan-2"]);
+    expect(state.activeSurfaceId).toBe("plan:plan-1");
+    expect(selectActiveRightPanel(useRightPanelStore.getState().byThreadKey, refA)).toBe("plan");
+
+    store.closeSurface(refA, "plan:plan-1");
+    const closed = selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA);
+    expect(closed.surfaces.map((surface) => surface.id)).toEqual(["plan:plan-2"]);
+    expect(closed.activeSurfaceId).toBe("plan:plan-2");
+  });
+
+  it("lets a proactive plan open apply until the user makes a panel choice", () => {
+    const store = useRightPanelStore.getState();
+    const planId = PlanId.make("plan-1");
+    const revision = store.getUserActionRevision(refA);
+    expect(store.openProactive(refA, { id: "plan:plan-1", kind: "plan", planId }, revision)).toBe(
+      true,
+    );
+    store.close(refA);
+    expect(
+      store.openProactive(
+        refA,
+        { id: "plan:plan-2", kind: "plan", planId: PlanId.make("plan-2") },
+        revision,
+      ),
+    ).toBe(false);
   });
 
   it("persists inline preference without restoring an open popover", () => {

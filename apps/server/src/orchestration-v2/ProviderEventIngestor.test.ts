@@ -1576,6 +1576,138 @@ layer("ProviderEventIngestorV2", (it) => {
     }),
   );
 
+  it.effect("turns a completed create_plan call into one proposed plan", () =>
+    Effect.gen(function* () {
+      const now = yield* DateTime.now;
+      const eventSink = yield* EventSink.EventSinkV2;
+      const projectionStore = yield* ProjectionStore.ProjectionStoreV2;
+      const ingestor = yield* ProviderEventIngestor.ProviderEventIngestorV2;
+      const idAllocator = yield* IdAllocator.IdAllocatorV2;
+      const threadEvent = yield* threadCreatedEvent(now);
+      const providerSessionId = yield* idAllocator.allocate.providerSession({
+        providerInstanceId: modelSelection.instanceId,
+        threadId: threadEvent.threadId,
+      });
+      const toolItem = (
+        id: string,
+        toolName: string,
+        status: OrchestrationV2TurnItem["status"],
+        input: unknown = { title: "Add login", markdown: "# Add login\n\n1. Do it" },
+        output?: unknown,
+      ): OrchestrationV2TurnItem => ({
+        id: TurnItemId.make(id),
+        threadId: threadEvent.threadId,
+        runId: null,
+        nodeId: NodeId.make(`node:${id}`),
+        providerThreadId: null,
+        providerTurnId: null,
+        nativeItemRef: null,
+        parentItemId: null,
+        ordinal: 1,
+        status,
+        title: toolName,
+        startedAt: now,
+        completedAt: status === "completed" ? now : null,
+        updatedAt: now,
+        type: "dynamic_tool",
+        toolName,
+        input,
+        ...(output === undefined ? {} : { output }),
+      });
+      const ingest = (turnItem: OrchestrationV2TurnItem) =>
+        ingestor.ingestNormalized({
+          providerSessionId,
+          providerInstanceId: modelSelection.instanceId,
+          threadId: threadEvent.threadId,
+          event: { type: "turn_item.updated", driver: CODEX_DRIVER, turnItem },
+        });
+      const proposedPlans = () =>
+        projectionStore
+          .getThreadProjection(threadEvent.threadId)
+          .pipe(Effect.map((projection) => projection.plans));
+
+      yield* eventSink.write({ events: [threadEvent] });
+
+      // Not completed, failed, another tool, or malformed arguments: no plan.
+      yield* ingest(toolItem("turn-item:plan-running", "mcp__t3-code__create_plan", "running"));
+      yield* ingest(toolItem("turn-item:plan-failed", "mcp__t3-code__create_plan", "failed"));
+      yield* ingest(toolItem("turn-item:other-tool", "mcp__t3-code__html_render", "completed"));
+      yield* ingest(
+        toolItem("turn-item:plan-empty", "mcp__t3-code__create_plan", "completed", {
+          title: "Empty",
+          markdown: "",
+        }),
+      );
+      yield* ingest(
+        toolItem(
+          "turn-item:plan-error-output",
+          "mcp__t3-code__create_plan",
+          "completed",
+          { title: "Add login", markdown: "# Add login" },
+          { isError: true, content: [{ type: "text", text: "failed" }] },
+        ),
+      );
+      assert.deepEqual(yield* proposedPlans(), []);
+
+      const completed = toolItem("turn-item:plan-ok", "mcp__t3-code__create_plan", "completed");
+      yield* ingest(completed);
+      const [plan] = yield* proposedPlans();
+      assert.equal(plan?.kind, "proposed_plan");
+      assert.equal(plan?.status, "active");
+      assert.equal(
+        plan?.kind === "proposed_plan" ? plan.markdown : null,
+        "# Add login\n\n1. Do it",
+      );
+      assert.equal(plan?.nodeId, "node:turn-item:plan-ok");
+      const planItem = yield* projectionStore.getTurnItem({
+        threadId: threadEvent.threadId,
+        itemId: TurnItemId.make("turn-item:create-plan:turn-item:plan-ok"),
+      });
+      assert.equal(planItem?.type, "proposed_plan");
+      assert.equal(planItem?.type === "proposed_plan" ? planItem.planId : null, plan?.id);
+
+      // A repeated update neither duplicates the plan nor reopens a consumed one.
+      yield* eventSink.write({
+        events: [
+          {
+            id: yield* idAllocator.allocate.event({ threadId: threadEvent.threadId }),
+            type: "plan.updated",
+            threadId: threadEvent.threadId,
+            occurredAt: now,
+            payload: { ...plan!, status: "completed" },
+          },
+        ],
+      });
+      yield* ingest(completed);
+      const after = yield* proposedPlans();
+      assert.equal(after.length, 1);
+      assert.equal(after[0]?.status, "completed");
+
+      // Grok wraps the arguments and reports its MCP output in its own envelope.
+      yield* ingest(
+        toolItem(
+          "turn-item:plan-grok",
+          "t3-code.create_plan",
+          "completed",
+          {
+            tool_name: "t3-code__create_plan",
+            tool_input: { title: "Grok plan", markdown: "# Grok plan" },
+          },
+          {
+            type: "MCP",
+            tool_name: "create_plan",
+            server_name: "t3-code",
+            output: { OkayOutput: '{"message":"Plan shown to the user for review."}' },
+          },
+        ),
+      );
+      const grokPlan = (yield* proposedPlans()).find(
+        (candidate) => candidate.id === "plan:create-plan:turn-item:plan-grok",
+      );
+      assert.equal(grokPlan?.kind === "proposed_plan" ? grokPlan.markdown : null, "# Grok plan");
+    }),
+  );
+
   it.effect("stores a bounded copy of a large file-change diff in both SQLite tables", () =>
     Effect.gen(function* () {
       const now = yield* DateTime.now;

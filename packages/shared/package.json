@@ -123,6 +123,10 @@
       "types": "./src/toolOutput.ts",
       "import": "./src/toolOutput.ts"
     },
+    "./createPlan": {
+      "types": "./src/createPlan.ts",
+      "import": "./src/createPlan.ts"
+    },
     "./htmlRender": {
       "types": "./src/htmlRender.ts",
       "import": "./src/htmlRender.ts"
