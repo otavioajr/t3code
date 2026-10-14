@@ -4,8 +4,11 @@ import { Spinner } from "~/components/ui/spinner";
 import {
   ArchiveIcon,
   ArrowUpDownIcon,
-  ChevronRightIcon,
+  CalendarClockIcon,
+  FolderIcon,
+  FolderOpenIcon,
   FolderPlusIcon,
+  PlugIcon,
   Globe2Icon,
   SearchIcon,
   SquarePenIcon,
@@ -21,7 +24,6 @@ import {
   useLinkedThreadPullRequest,
 } from "./ThreadStatusIndicators";
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
-import { ProjectFavicon } from "./ProjectFavicon";
 import { useAtomValue } from "@effect/atom-react";
 import { autoAnimate } from "@formkit/auto-animate";
 import React, { useCallback, useEffect, memo, useMemo, useRef, useState } from "react";
@@ -805,7 +807,13 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               <PullRequestGlyph.pullRequest className="size-3" />
             </a>
           ) : null}
-          {threadStatus && <ThreadStatusLabel status={threadStatus} />}
+          {threadStatus ? (
+            <ThreadStatusLabel status={threadStatus} compact />
+          ) : (
+            <span aria-hidden className="inline-flex size-3.5 shrink-0 items-center justify-center">
+              <span className="size-1.5 rounded-full bg-sidebar-muted-foreground/40" />
+            </span>
+          )}
           {canOperateThread && renamingThreadKey === threadKey ? (
             <input
               ref={handleRenameInputRef}
@@ -2580,20 +2588,15 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
                     }`}
                   />
                 </span>
-                <ChevronRightIcon className="absolute inset-0 m-auto size-3.5 text-icon-muted opacity-0 transition-opacity duration-150 group-hover/project-header:opacity-100" />
+                <FolderIcon className="absolute inset-0 m-auto size-3.5 text-icon-muted opacity-0 transition-opacity duration-150 group-hover/project-header:opacity-100" />
               </TooltipTrigger>
               <TooltipPopup side="top">{projectStatus.label}</TooltipPopup>
             </Tooltip>
+          ) : projectExpanded ? (
+            <FolderOpenIcon className="-ml-0.5 size-3.5 shrink-0 text-sidebar-muted-foreground" />
           ) : (
-            <ChevronRightIcon
-              className={`-ml-0.5 size-3.5 shrink-0 text-muted-foreground/70 transition-transform duration-150 ${
-                projectExpanded ? "rotate-90" : ""
-              }`}
-            />
+            <FolderIcon className="-ml-0.5 size-3.5 shrink-0 text-sidebar-muted-foreground" />
           )}
-          <span className="flex shrink-0">
-            <ProjectFavicon project={project} />
-          </span>
           <span className="flex min-w-0 flex-1 items-center gap-2">
             <span className="truncate text-xs font-medium text-sidebar-muted-foreground transition-colors duration-150 group-hover/project-header:text-sidebar-foreground">
               {project.displayName}
@@ -3123,8 +3126,32 @@ function SidebarNewAgentButton({ shortcutLabel }: { readonly shortcutLabel: stri
   return (
     <SidebarMenuButton data-testid="sidebar-new-agent" onClick={handleClick}>
       <SquarePenIcon />
-      <span className="flex-1 truncate">New Agent</span>
+      <span className="flex-1 truncate">New Chat</span>
       {shortcutLabel ? <Kbd>{shortcutLabel}</Kbd> : null}
+    </SidebarMenuButton>
+  );
+}
+
+function SidebarNavLinkButton({
+  to,
+  icon,
+  children,
+}: {
+  readonly to: "/settings/scheduled-tasks" | "/settings/plugins";
+  readonly icon: React.ReactNode;
+  readonly children: React.ReactNode;
+}) {
+  const navigate = useNavigate();
+  const { isMobile, setOpenMobile } = useSidebar();
+  const handleClick = useCallback(() => {
+    if (isMobile) setOpenMobile(false);
+    void navigate({ to });
+  }, [isMobile, navigate, setOpenMobile, to]);
+
+  return (
+    <SidebarMenuButton onClick={handleClick}>
+      {icon}
+      <span className="flex-1 truncate">{children}</span>
     </SidebarMenuButton>
   );
 }
@@ -3209,6 +3236,16 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
                 <span className="flex-1 truncate">Search</span>
                 {commandPaletteShortcutLabel ? <Kbd>{commandPaletteShortcutLabel}</Kbd> : null}
               </CommandDialogTrigger>
+            </SidebarMenuItem>
+            <SidebarMenuItem>
+              <SidebarNavLinkButton to="/settings/scheduled-tasks" icon={<CalendarClockIcon />}>
+                Automations
+              </SidebarNavLinkButton>
+            </SidebarMenuItem>
+            <SidebarMenuItem>
+              <SidebarNavLinkButton to="/settings/plugins" icon={<PlugIcon />}>
+                Customize
+              </SidebarNavLinkButton>
             </SidebarMenuItem>
           </SidebarMenu>
         </SidebarGroup>
