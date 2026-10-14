@@ -87,11 +87,13 @@ import { isMacPlatform } from "../lib/utils";
 import { useSidebarPendingFileDropStore } from "../sidebarPendingFileDropStore";
 import { makeWorkspaceFileDropHandlers } from "./chat/workspaceFileDrop";
 import {
+  readProjects,
   readThreadShell,
   useProjects,
   useThreadShells,
   useThreadShellsForProjectRefs,
   waitForProjectRemoval,
+  waitForThreadArchived,
 } from "../state/entities";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
 import { useThreadRunningTerminalIds } from "../state/terminalSessions";
@@ -210,7 +212,12 @@ import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrom
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { useIsMobile } from "~/hooks/useMediaQuery";
 import { CommandDialogTrigger } from "./ui/command";
-import { useClientSettings, useUpdateClientSettings } from "~/hooks/useSettings";
+import { getClientSettings, useClientSettings, useUpdateClientSettings } from "~/hooks/useSettings";
+import {
+  findHiddenProjectsToRestore,
+  withHiddenProject,
+  withoutHiddenProjects,
+} from "./sidebarHiddenProjects.logic";
 import { primaryServerKeybindingsAtom } from "../state/server";
 import {
   derivePhysicalProjectKey,
@@ -1699,6 +1706,101 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     [memberThreadCountByPhysicalKey, removeProject],
   );
 
+  // Archives every active thread of the project, then hides it. Archiving goes first so the
+  // restore rule (a hidden project with an active thread comes back) never sees it half-done.
+  const removeProjectFromSidebar = useCallback(async () => {
+    const memberProjectKeys = new Set(
+      project.memberProjects.map((member) =>
+        scopedProjectKey(scopeProjectRef(member.environmentId, member.id)),
+      ),
+    );
+    const activeThreads = Array.from(sidebarThreadByKeyRef.current.values()).filter(
+      (thread) =>
+        thread.archivedAt === null &&
+        memberProjectKeys.has(
+          scopedProjectKey(scopeProjectRef(thread.environmentId, thread.projectId)),
+        ),
+    );
+    if (activeThreads.some((thread) => !threadRuntimeCanArchive(thread.runtime))) {
+      toastManager.add(
+        stackedThreadToast({
+          type: "warning",
+          title: "Project has running threads",
+          description: "Stop or wait for its running threads before removing it from the sidebar.",
+        }),
+      );
+      return;
+    }
+
+    const archivedThreadKeys: string[] = [];
+    let failedCount = 0;
+    for (const thread of activeThreads) {
+      const threadRef = scopeThreadRef(thread.environmentId, thread.id);
+      const result = await archiveThread(threadRef);
+      if (result._tag === "Failure") {
+        failedCount += 1;
+      } else {
+        await waitForThreadArchived(threadRef);
+        archivedThreadKeys.push(scopedThreadKey(threadRef));
+      }
+    }
+    if (failedCount > 0) {
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: `Couldn't remove "${project.displayName}" from the sidebar`,
+          description: `${failedCount} thread${failedCount === 1 ? "" : "s"} could not be archived.`,
+        }),
+      );
+      return;
+    }
+
+    // Leave the project first: an open thread or new-thread draft in it would restore it at once,
+    // and "/" lands on a draft in the most recent project, which may be this one.
+    const routeTarget = resolveThreadRouteTarget(
+      router.state.matches[router.state.matches.length - 1]?.params ?? {},
+    );
+    const routeDraft =
+      routeTarget?.kind === "draft"
+        ? useComposerDraftStore.getState().getDraftSession(routeTarget.draftId)
+        : null;
+    const routeInProject =
+      activeRouteThreadKey !== null ||
+      (routeDraft !== null &&
+        memberProjectKeys.has(
+          scopedProjectKey(scopeProjectRef(routeDraft.environmentId, routeDraft.projectId)),
+        ));
+    if (routeInProject) {
+      const fallbackProject = readProjects().find(
+        (candidate) =>
+          !memberProjectKeys.has(
+            scopedProjectKey(scopeProjectRef(candidate.environmentId, candidate.id)),
+          ),
+      );
+      if (fallbackProject) {
+        await handleNewThread(scopeProjectRef(fallbackProject.environmentId, fallbackProject.id));
+      } else {
+        await router.navigate({ to: "/settings/archived" });
+      }
+    }
+    updateSettings({
+      sidebarHiddenProjects: withHiddenProject(
+        getClientSettings().sidebarHiddenProjects,
+        project.projectKey,
+        archivedThreadKeys,
+      ),
+    });
+  }, [
+    activeRouteThreadKey,
+    archiveThread,
+    handleNewThread,
+    project.displayName,
+    project.memberProjects,
+    project.projectKey,
+    router,
+    updateSettings,
+  ]);
+
   const handleProjectButtonContextMenu = useCallback(
     (event: React.MouseEvent<HTMLButtonElement>) => {
       event.preventDefault();
@@ -1781,6 +1883,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
             params: { projectKey: project.projectKey },
           });
         });
+        actionHandlers.set("remove-from-sidebar", removeProjectFromSidebar);
 
         const clicked = await api.contextMenu.show(
           [
@@ -1791,6 +1894,16 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
             buildTargetedItem("grouping", "Group into..."),
             buildTargetedItem("copy-path", "Copy Path"),
             { id: "project-settings", label: "Project settings", icon: "settings" },
+            {
+              id: "remove-from-sidebar",
+              label: "Remove from sidebar",
+              ...(project.memberProjects.some(
+                (member) =>
+                  !readEnvironmentScope(member.environmentId, AuthOrchestrationOperateScope),
+              )
+                ? { disabled: true }
+                : {}),
+            },
             buildTargetedItem("delete", "Remove", {
               destructive: true,
               isDisabled: (member) =>
@@ -1819,6 +1932,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       project.groupedProjectCount,
       project.memberProjects,
       project.projectKey,
+      removeProjectFromSidebar,
       router,
       setOpenMobile,
       suppressProjectClickForContextMenuRef,
@@ -3253,7 +3367,8 @@ export default function LegacySidebar() {
   const sidebarThreadPreviewCount = useClientSettings((s) => s.sidebarThreadPreviewCount);
   const updateSettings = useUpdateClientSettings();
   const handleNewThread = useNewThreadHandler();
-  const { archiveThread, deleteThread, markThreadUnread } = useThreadActions();
+  const { archiveThread, deleteThread, markThreadUnread, unarchiveThread } = useThreadActions();
+  const sidebarHiddenProjects = useClientSettings((s) => s.sidebarHiddenProjects);
   const { isMobile, setOpenMobile } = useSidebar();
   const routeTarget = useParams({
     strict: false,
@@ -3528,6 +3643,58 @@ export default function LegacySidebar() {
     () => sidebarThreads.filter((thread) => thread.archivedAt === null),
     [sidebarThreads],
   );
+  const hiddenProjectsToRestore = useMemo(() => {
+    const activeThreadCountByProjectKey = new Map<string, number>();
+    for (const [projectKey, threads] of threadsByProjectKey) {
+      activeThreadCountByProjectKey.set(
+        projectKey,
+        threads.filter((thread) => thread.archivedAt === null).length,
+      );
+    }
+    // A new-thread draft has no thread shell yet, so read its project from the draft session.
+    const routeDraftPhysicalKey = routeDraftThread
+      ? scopedProjectKey(
+          scopeProjectRef(routeDraftThread.environmentId, routeDraftThread.projectId),
+        )
+      : null;
+    const routeDraftProjectKey = routeDraftPhysicalKey
+      ? (physicalToLogicalKey.get(
+          projectPhysicalKeyByScopedRef.get(routeDraftPhysicalKey) ?? routeDraftPhysicalKey,
+        ) ?? routeDraftPhysicalKey)
+      : null;
+    return findHiddenProjectsToRestore({
+      hiddenProjects: sidebarHiddenProjects,
+      activeThreadCountByProjectKey,
+      activeRouteProjectKey: activeRouteProjectKey ?? routeDraftProjectKey,
+    });
+  }, [
+    activeRouteProjectKey,
+    physicalToLogicalKey,
+    projectPhysicalKeyByScopedRef,
+    routeDraftThread,
+    sidebarHiddenProjects,
+    threadsByProjectKey,
+  ]);
+  const restoringHiddenProjectsRef = useRef(new Set<string>());
+  useEffect(() => {
+    for (const projectKey of hiddenProjectsToRestore) {
+      if (restoringHiddenProjectsRef.current.has(projectKey)) continue;
+      restoringHiddenProjectsRef.current.add(projectKey);
+      const archivedThreadKeys = sidebarHiddenProjects[projectKey] ?? [];
+      void (async () => {
+        for (const threadKey of archivedThreadKeys) {
+          const threadRef = parseScopedThreadKey(threadKey);
+          if (threadRef) await unarchiveThread(threadRef);
+        }
+        updateSettings({
+          sidebarHiddenProjects: withoutHiddenProjects(getClientSettings().sidebarHiddenProjects, [
+            projectKey,
+          ]),
+        });
+        restoringHiddenProjectsRef.current.delete(projectKey);
+      })();
+    }
+  }, [hiddenProjectsToRestore, sidebarHiddenProjects, unarchiveThread, updateSettings]);
   const sortedProjects = useMemo(() => {
     const sortableProjects = sidebarProjects.map((project) => ({
       ...project,
@@ -3549,9 +3716,13 @@ export default function LegacySidebar() {
       sidebarProjectSortOrder,
     ).flatMap((project) => {
       const resolvedProject = sidebarProjectByKey.get(project.id);
-      return resolvedProject ? [resolvedProject] : [];
+      const hidden =
+        project.id in sidebarHiddenProjects && !hiddenProjectsToRestore.includes(project.id);
+      return resolvedProject && !hidden ? [resolvedProject] : [];
     });
   }, [
+    hiddenProjectsToRestore,
+    sidebarHiddenProjects,
     sidebarProjectSortOrder,
     physicalToLogicalKey,
     projectPhysicalKeyByScopedRef,

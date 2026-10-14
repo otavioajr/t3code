@@ -221,6 +221,16 @@ export function waitForThreadShell(ref: ScopedThreadRef, timeoutMs = 5_000): Pro
   });
 }
 
+/** Resolves once the thread's shell shows it archived (or gone), so callers act on the archived state. */
+export function waitForThreadArchived(ref: ScopedThreadRef, timeoutMs = 5_000): Promise<boolean> {
+  return waitForAtomValue({
+    registry: appAtomRegistry,
+    atom: environmentThreadShells.threadShellAtom(ref),
+    predicate: (thread) => thread === null || thread.archivedAt !== null,
+    timeoutMs,
+  });
+}
+
 /** Whether the environment hosts preview tabs in its own browser (`runtime: "server"`),
     so clients without Electron can still use the Browser panel. */
 export function useEnvironmentSupportsServerBrowser(environmentId: EnvironmentId | null): boolean {
