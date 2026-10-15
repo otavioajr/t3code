@@ -23,6 +23,7 @@ import {
   AuthOrchestrationOperateScope,
   AuthTerminalOperateScope,
   type ContextMenuItem,
+  type KeybindingShortcut,
   type ProviderInstanceId,
   type ResolvedKeybindingsConfig,
   type ScopedThreadRef,
@@ -63,6 +64,8 @@ import { useOpenInPreferredEditor } from "../editorPreferences";
 import { resolvePathLinkTarget } from "@t3tools/shared/fileLinks";
 import { isTerminalUrl } from "../terminal-links";
 import {
+  findEffectiveShortcutForCommand,
+  isAddSelectionToChatShortcut,
   isDiffToggleShortcut,
   isTerminalClearShortcut,
   isTerminalNewShortcut,
@@ -320,11 +323,19 @@ export type TerminalContextMenuAction =
 /** Post-selection popup: available selection actions, always enabled. */
 export function terminalSelectionMenuItems(options?: {
   canAddToChat?: boolean;
+  addToChatShortcut?: KeybindingShortcut | null;
 }): ContextMenuItem<"add-to-chat" | "copy">[] {
+  const addToChatShortcut = options?.addToChatShortcut ?? null;
   return [
     ...(options?.canAddToChat === false
       ? []
-      : ([{ id: "add-to-chat", label: "Add to chat" }] satisfies ContextMenuItem<"add-to-chat">[])),
+      : ([
+          {
+            id: "add-to-chat",
+            label: "Add to chat",
+            ...(addToChatShortcut ? { shortcut: addToChatShortcut } : {}),
+          },
+        ] satisfies ContextMenuItem<"add-to-chat">[])),
     { id: "copy", label: "Copy" },
   ];
 }
@@ -339,10 +350,11 @@ export function terminalContextMenuItems(options: {
   hasSelection: boolean;
   canAddToChat?: boolean;
   readOnly?: boolean;
+  addToChatShortcut?: KeybindingShortcut | null;
 }): ContextMenuItem<TerminalContextMenuAction>[] {
-  const { hasSelection, canAddToChat = true } = options;
+  const { hasSelection, canAddToChat = true, addToChatShortcut = null } = options;
   return [
-    ...terminalSelectionMenuItems({ canAddToChat }).map((item) => ({
+    ...terminalSelectionMenuItems({ canAddToChat, addToChatShortcut }).map((item) => ({
       ...item,
       disabled: !hasSelection,
     })),
@@ -712,10 +724,16 @@ export function TerminalViewport({
         };
       };
 
+      const readAddToChatShortcut = () =>
+        findEffectiveShortcutForCommand(keybindingsRef.current, "chat.addSelection", {
+          context: { terminalFocus: true, terminalOpen: true },
+        });
+
+      // Leaves focus to the composer, which takes it once the context lands,
+      // so typing can start right away.
       const addSelectionToChat = (selection: TerminalContextSelection) => {
         handleAddTerminalContext(selection);
         terminalRef.current?.clearSelection();
-        terminalRef.current?.focus();
       };
 
       // A selection-action flow that was superseded while its async work ran
@@ -779,6 +797,7 @@ export function TerminalViewport({
               hasSelection: selectionAction !== null,
               canAddToChat: canAddSelectionToChat(),
               readOnly: !hasTerminalWriteAccess(),
+              addToChatShortcut: readAddToChatShortcut(),
             }),
             { x: event.clientX, y: event.clientY },
           );
@@ -830,7 +849,10 @@ export function TerminalViewport({
         openSelectionMenuRequestIdRef.current = requestId;
         const clicked = await localApi.contextMenu
           .show(
-            terminalSelectionMenuItems({ canAddToChat: canAddSelectionToChat() }),
+            terminalSelectionMenuItems({
+              canAddToChat: canAddSelectionToChat(),
+              addToChatShortcut: readAddToChatShortcut(),
+            }),
             nextAction.position,
           )
           .finally(() => {
@@ -895,6 +917,19 @@ export function TerminalViewport({
           event.stopPropagation();
           void sendTerminalInput(deleteData, "Failed to delete terminal input");
           return false;
+        }
+
+        // Only claims the key while there is a selection, so Ctrl+L still
+        // clears the screen where `mod` is Ctrl.
+        if (isAddSelectionToChatShortcut(event, currentKeybindings, options)) {
+          const selectionAction = readSelectionAction();
+          if (selectionAction && canAddSelectionToChat()) {
+            event.preventDefault();
+            event.stopPropagation();
+            clearSelectionAction();
+            addSelectionToChat(selectionAction.selection);
+            return false;
+          }
         }
 
         if (!isTerminalClearShortcut(event)) return true;

@@ -135,7 +135,7 @@ export function effectiveShortcutsForCommand(
   return effective;
 }
 
-function findEffectiveShortcutForCommand(
+export function findEffectiveShortcutForCommand(
   keybindings: ResolvedKeybindingsConfig,
   command: KeybindingCommand,
   options?: ShortcutMatchOptions,
@@ -334,6 +334,14 @@ export function isTerminalCloseShortcut(
   options?: ShortcutMatchOptions,
 ): boolean {
   return matchesCommandShortcut(event, keybindings, "terminal.close", options);
+}
+
+export function isAddSelectionToChatShortcut(
+  event: ShortcutEventLike,
+  keybindings: ResolvedKeybindingsConfig,
+  options?: ShortcutMatchOptions,
+): boolean {
+  return matchesCommandShortcut(event, keybindings, "chat.addSelection", options);
 }
 
 export function isDiffToggleShortcut(

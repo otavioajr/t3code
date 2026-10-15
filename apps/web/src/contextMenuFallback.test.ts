@@ -234,6 +234,37 @@ describe("showContextMenuFallback", () => {
     await expect(selectionPromise).resolves.toBeNull();
   });
 
+  it("renders a formatted shortcut beside the item that has one", async () => {
+    vi.stubGlobal("navigator", { platform: "MacIntel" });
+    const selectionPromise = showContextMenuFallback([
+      {
+        id: "add-to-chat",
+        label: "Add to chat",
+        shortcut: {
+          key: "l",
+          metaKey: false,
+          ctrlKey: false,
+          shiftKey: false,
+          altKey: false,
+          modKey: true,
+        },
+      },
+      { id: "copy", label: "Copy" },
+    ]);
+
+    const addButton = findButton("Add to chat");
+    const shortcut = addButton?.children.find(
+      (child) => child.dataset.contextMenuShortcut === "true",
+    );
+    expect(shortcut?.textContent).toBe("⌘L");
+    expect(
+      findButton("Copy")?.children.some((child) => child.dataset.contextMenuShortcut === "true"),
+    ).toBe(false);
+
+    dismissContextMenu();
+    await expect(selectionPromise).resolves.toBeNull();
+  });
+
   it("resolves a clicked flat menu item", async () => {
     const selectionPromise = showContextMenuFallback([
       { id: "rename", label: "Rename" },

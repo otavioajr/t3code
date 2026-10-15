@@ -647,6 +647,19 @@ describe("toElectronAccelerator", () => {
       }),
     ).toBe("Control+Alt+Up");
   });
+
+  it("normalizes lowercase keybinding names", () => {
+    expect(
+      toElectronAccelerator({
+        key: "arrowup",
+        metaKey: false,
+        ctrlKey: false,
+        shiftKey: false,
+        altKey: false,
+        modKey: true,
+      }),
+    ).toBe("CommandOrControl+Up");
+  });
 });
 
 describe("findCaptureSource", () => {

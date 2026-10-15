@@ -5,17 +5,21 @@ import {
   type ScopedThreadRef,
 } from "@t3tools/contracts";
 import { QuoteIcon } from "lucide-react";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useAtomValue } from "@effect/atom-react";
+import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { isAddSelectionToChatShortcut } from "~/keybindings";
 import {
   captureAssistantTextSelection,
   type AssistantCitationSourceAnchor,
 } from "~/lib/assistantTextSelection";
+import { isPreviewFocused } from "~/lib/previewFocus";
 import {
   observeSelectionActions,
   resolveSelectionActionPosition,
   type SelectionActionPoint,
 } from "~/lib/selectionActions";
+import { primaryServerKeybindingsAtom } from "~/state/server";
 import { Button } from "../ui/button";
 
 export function AssistantSelectionToolbar({
@@ -34,6 +38,7 @@ export function AssistantSelectionToolbar({
   } | null>(null);
   const toolbarRef = useRef<HTMLButtonElement>(null);
   const actionsRef = useRef<ReturnType<typeof observeSelectionActions> | null>(null);
+  const keybindings = useAtomValue(primaryServerKeybindingsAtom);
 
   useLayoutEffect(() => {
     const toolbar = toolbarRef.current;
@@ -123,18 +128,45 @@ export function AssistantSelectionToolbar({
     };
   }, [threadRef, viewport]);
 
-  if (!selection) return null;
-  const tooLong = selection.citation.text.length > ASSISTANT_CITATION_MAX_TEXT_LENGTH;
   const dismiss = () => {
     actionsRef.current?.cancel();
     setSelection(null);
   };
   const cite = () => {
-    if (tooLong || !onCite(selection.citation, selection.sourceAnchor)) return false;
+    if (
+      !selection ||
+      selection.citation.text.length > ASSISTANT_CITATION_MAX_TEXT_LENGTH ||
+      !onCite(selection.citation, selection.sourceAnchor)
+    ) {
+      return false;
+    }
     window.getSelection()?.removeAllRanges();
     dismiss();
     return true;
   };
+  // Mirrors the Cite button for the add-selection shortcut while a selection is live.
+  const citeFromShortcut = useEffectEvent((event: KeyboardEvent) => {
+    if (
+      event.isComposing ||
+      !isAddSelectionToChatShortcut(event, keybindings, {
+        context: { previewFocus: isPreviewFocused() },
+      }) ||
+      !cite()
+    ) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+  });
+  useEffect(() => {
+    if (!selection) return;
+    const onKeyDown = (event: KeyboardEvent) => citeFromShortcut(event);
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => document.removeEventListener("keydown", onKeyDown, true);
+  }, [selection]);
+
+  if (!selection) return null;
+  const tooLong = selection.citation.text.length > ASSISTANT_CITATION_MAX_TEXT_LENGTH;
   return createPortal(
     <Button
       ref={toolbarRef}

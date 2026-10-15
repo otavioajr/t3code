@@ -8,6 +8,8 @@ import * as Schema from "effect/Schema";
 
 import * as Electron from "electron";
 
+import { toElectronAccelerator } from "./accelerator.ts";
+
 export interface ElectronMenuPosition {
   readonly x: number;
   readonly y: number;
@@ -81,6 +83,7 @@ function normalizeContextMenuItems(source: readonly ContextMenuItem[]): ContextM
       disabled: sourceItem.disabled === true,
       ...(sourceItem.separatorBefore === true ? { separatorBefore: true } : {}),
       ...(typeof sourceItem.checked === "boolean" ? { checked: sourceItem.checked } : {}),
+      ...(sourceItem.shortcut ? { shortcut: sourceItem.shortcut } : {}),
     };
 
     if (sourceItem.children) {
@@ -170,6 +173,14 @@ export const make = Effect.gen(function* () {
         label: item.label,
         enabled: !item.disabled,
         ...(typeof item.checked === "boolean" ? { type: "checkbox", checked: item.checked } : {}),
+        // Display only. The renderer already dispatches the chord, so the menu
+        // must not register a second system accelerator.
+        ...(item.shortcut
+          ? {
+              accelerator: toElectronAccelerator(item.shortcut),
+              registerAccelerator: false,
+            }
+          : {}),
       };
       if (item.children && item.children.length > 0) {
         itemOption.submenu = buildTemplate(item.children, complete);

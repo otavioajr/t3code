@@ -122,6 +122,41 @@ describe("ElectronMenu", () => {
     }).pipe(Effect.provide(layerTest)),
   );
 
+  it.effect("displays a shortcut without registering it", () =>
+    Effect.gen(function* () {
+      buildFromTemplateMock.mockImplementation(() => ({
+        popup: (options: Electron.PopupOptions) => options.callback?.(),
+      }));
+
+      const electronMenu = yield* ElectronMenu.ElectronMenu;
+      yield* electronMenu.showContextMenu({
+        window: makeWindow(),
+        items: [
+          {
+            id: "add-to-chat",
+            label: "Add to chat",
+            shortcut: {
+              key: "l",
+              metaKey: false,
+              ctrlKey: false,
+              shiftKey: false,
+              altKey: false,
+              modKey: true,
+            },
+          },
+          { id: "copy", label: "Copy" },
+        ],
+        position: Option.none(),
+      });
+
+      const template = buildFromTemplateMock.mock.calls[0]?.[0];
+      assert.equal(template?.[0]?.accelerator, "CommandOrControl+L");
+      assert.equal(template?.[0]?.registerAccelerator, false);
+      assert.isUndefined(template?.[1]?.accelerator);
+      assert.isUndefined(template?.[1]?.registerAccelerator);
+    }).pipe(Effect.provide(layerTest)),
+  );
+
   it.effect("keeps a preceding non-destructive action in the destructive section", () =>
     Effect.gen(function* () {
       buildFromTemplateMock.mockImplementation(() => ({

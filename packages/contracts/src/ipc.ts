@@ -13,7 +13,7 @@ import { AdvertisedEndpoint } from "./remoteAccess.ts";
 import { ExecutionEnvironmentDescriptor } from "./environment.ts";
 import { type ClientSettings, type QuitConfirmationMode, SnapShotShortcut } from "./settings.ts";
 import type { EditorId } from "./editor.ts";
-import type { PreviewForwardedShortcut } from "./keybindings.ts";
+import { KeybindingShortcut, type PreviewForwardedShortcut } from "./keybindings.ts";
 
 import type {
   DesktopAppActivationRequest,
@@ -33,6 +33,8 @@ export interface ContextMenuItem<T extends string = string> {
   separatorBefore?: boolean;
   /** Shows a check mark. Used to mark the current option inside a submenu. */
   checked?: boolean;
+  /** Display-only chord. Menus show it; they do not register it as a global shortcut. */
+  shortcut?: KeybindingShortcut;
   children?: readonly ContextMenuItem<T>[];
 }
 
@@ -49,6 +51,7 @@ export interface ContextMenuItemSchemaType {
   readonly icon?: string;
   readonly separatorBefore?: boolean;
   readonly checked?: boolean;
+  readonly shortcut?: KeybindingShortcut;
   readonly children?: readonly ContextMenuItemSchemaType[];
 }
 
@@ -61,6 +64,7 @@ export const ContextMenuItemSchema: Schema.Codec<ContextMenuItemSchemaType> = Sc
   icon: Schema.optionalKey(Schema.String),
   separatorBefore: Schema.optionalKey(Schema.Boolean),
   checked: Schema.optionalKey(Schema.Boolean),
+  shortcut: Schema.optionalKey(KeybindingShortcut),
   children: Schema.optionalKey(
     Schema.Array(
       Schema.suspend((): Schema.Codec<ContextMenuItemSchemaType> => ContextMenuItemSchema),

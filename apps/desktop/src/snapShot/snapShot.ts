@@ -16,6 +16,8 @@ import {
   type SnapShotShortcut,
 } from "@t3tools/contracts";
 
+import { toElectronAccelerator } from "../electron/accelerator.ts";
+
 interface AccessibilityTreeNode {
   readonly name?: string;
   readonly value?: string;
@@ -526,16 +528,6 @@ export function findAccessibleWindow<
   return boundsMatches.length === 1 ? boundsMatches[0] : undefined;
 }
 
-const ELECTRON_KEY_NAMES: Readonly<Record<string, string>> = {
-  " ": "Space",
-  "+": "Plus",
-  ArrowDown: "Down",
-  ArrowLeft: "Left",
-  ArrowRight: "Right",
-  ArrowUp: "Up",
-  Escape: "Esc",
-};
-
 /** Two shortcuts are the same when they would register the same listener. */
 export function sameSnapShotShortcut(left: SnapShotShortcut, right: SnapShotShortcut): boolean {
   if (isModifierPairShortcut(left) || isModifierPairShortcut(right)) {
@@ -548,16 +540,7 @@ export function sameSnapShotShortcut(left: SnapShotShortcut, right: SnapShotShor
   return toElectronAccelerator(left) === toElectronAccelerator(right);
 }
 
-export function toElectronAccelerator(shortcut: SnapShotKeyChord): string {
-  const parts: string[] = [];
-  if (shortcut.modKey) parts.push("CommandOrControl");
-  if (shortcut.metaKey) parts.push("Super");
-  if (shortcut.ctrlKey) parts.push("Control");
-  if (shortcut.altKey) parts.push("Alt");
-  if (shortcut.shiftKey) parts.push("Shift");
-  parts.push(ELECTRON_KEY_NAMES[shortcut.key] ?? shortcut.key.toUpperCase());
-  return parts.join("+");
-}
+export { toElectronAccelerator };
 
 interface CaptureSourceLike {
   readonly id: string;

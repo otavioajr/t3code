@@ -1,5 +1,7 @@
 import type { ContextMenuItem } from "@t3tools/contracts";
 
+import { formatShortcutLabel } from "./keybindings";
+
 const SVG_NS = "http://www.w3.org/2000/svg";
 
 // Inline Lucide-style icon paths (stroke-based, viewBox 0 0 24 24, strokeWidth 2).
@@ -381,6 +383,16 @@ export function showContextMenuFallback<T extends string>(
         label.className = "min-w-0 flex-1 truncate";
         label.textContent = item.label;
         button.appendChild(label);
+
+        if (item.shortcut) {
+          const shortcut = document.createElement("span");
+          shortcut.className = "ms-auto shrink-0 ps-4 text-xs text-muted-foreground";
+          shortcut.style.cssText =
+            "margin-inline-start:auto;flex-shrink:0;padding-inline-start:1rem;font-size:0.75rem;line-height:1rem;color:var(--contrast-muted-foreground);";
+          shortcut.textContent = formatShortcutLabel(item.shortcut);
+          shortcut.dataset.contextMenuShortcut = "true";
+          button.appendChild(shortcut);
+        }
 
         if (hasChildren) {
           button.setAttribute("aria-haspopup", "menu");

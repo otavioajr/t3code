@@ -270,6 +270,30 @@ describe("settle thread shortcut", () => {
   });
 });
 
+describe("add selection to chat shortcut", () => {
+  it("resolves mod+l in the chat and the terminal", () => {
+    for (const terminalFocus of [false, true]) {
+      assert.equal(
+        resolveShortcutCommand(event({ key: "l", metaKey: true }), DEFAULT_RESOLVED_KEYBINDINGS, {
+          platform: "MacIntel",
+          context: { terminalFocus },
+        }),
+        "chat.addSelection",
+      );
+    }
+  });
+
+  it("leaves mod+l to the preview URL bar while the preview is focused", () => {
+    assert.equal(
+      resolveShortcutCommand(event({ key: "l", metaKey: true }), DEFAULT_RESOLVED_KEYBINDINGS, {
+        platform: "MacIntel",
+        context: { previewFocus: true },
+      }),
+      "preview.focusUrl",
+    );
+  });
+});
+
 describe("thread undo shortcut", () => {
   it("resolves mod+z with nothing editable focused", () => {
     assert.equal(

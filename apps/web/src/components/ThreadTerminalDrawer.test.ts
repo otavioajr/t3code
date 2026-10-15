@@ -48,6 +48,48 @@ describe("terminal selection menus", () => {
       "scroll-to-bottom",
     ]);
   });
+
+  it("shows the configured Add to chat shortcut and omits it when unset", () => {
+    const shortcut = {
+      key: "l",
+      metaKey: false,
+      ctrlKey: false,
+      shiftKey: false,
+      altKey: false,
+      modKey: true,
+    };
+
+    expect(terminalSelectionMenuItems({ addToChatShortcut: shortcut })).toEqual([
+      { id: "add-to-chat", label: "Add to chat", shortcut },
+      { id: "copy", label: "Copy" },
+    ]);
+    expect(terminalSelectionMenuItems()).toEqual([
+      { id: "add-to-chat", label: "Add to chat" },
+      { id: "copy", label: "Copy" },
+    ]);
+    expect(terminalSelectionMenuItems({ addToChatShortcut: null })[0]).toEqual({
+      id: "add-to-chat",
+      label: "Add to chat",
+    });
+
+    const contextItems = terminalContextMenuItems({
+      hasSelection: true,
+      addToChatShortcut: shortcut,
+    });
+    expect(contextItems.find((item) => item.id === "add-to-chat")).toEqual({
+      id: "add-to-chat",
+      label: "Add to chat",
+      shortcut,
+      disabled: false,
+    });
+    expect(
+      terminalContextMenuItems({ hasSelection: true }).find((item) => item.id === "add-to-chat"),
+    ).toEqual({
+      id: "add-to-chat",
+      label: "Add to chat",
+      disabled: false,
+    });
+  });
 });
 
 describe("terminalThemeFromApp", () => {
