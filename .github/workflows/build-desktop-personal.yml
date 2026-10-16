@@ -2,8 +2,9 @@ name: Build desktop (personal)
 
 # Unsigned macOS and Windows installers for personal installs of this fork.
 # Run it by hand from the Actions tab; the installers are uploaded as run
-# artifacts. Nothing is published, and the builds carry no update feed,
-# T3 Connect config, or embedded WSL runtime.
+# artifacts. Nothing is published, and the builds carry no update feed or
+# T3 Connect config. The Windows installer embeds the Linux CLI archive as its
+# WSL runtime, the same way release-desktop.yml does.
 
 on:
   workflow_dispatch:
@@ -17,8 +18,96 @@ permissions:
   contents: read
 
 jobs:
+  # The WSL backend runs this archive inside the distro. Without it the Windows
+  # app stays on "Connecting WSL" forever.
+  cli_linux:
+    name: Build Linux x64 CLI archive
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        shell: bash
+        env:
+          CHECKOUT_REF: ${{ inputs.ref }}
+          GIT_TERMINAL_PROMPT: "0"
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          git fetch --no-tags --depth=1 origin "$CHECKOUT_REF"
+          git sparse-checkout set --no-cone '/*' '!/.repos/'
+          git -c checkout.workers=0 checkout --detach FETCH_HEAD
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@250f29ce396baf5e8f24498e17c0dfdebabc26eb # v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: false
+
+      - name: Install build libraries
+        run: sudo apt-get update && sudo apt-get install -y libsecret-1-dev pkg-config
+
+      - name: Install dependencies
+        run: vp install
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          toolchain: stable
+          targets: x86_64-unknown-linux-gnu
+
+      # The archive name must carry the app version: the Windows build
+      # rejects a WSL runtime whose top-level directory names another version.
+      - name: Read app version
+        id: version
+        shell: bash
+        run: echo "version=$(node -p "require('./apps/server/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Build server and web client
+        run: vp run --filter t3 build
+
+      # Keep VP_NODE_VERSION in step with SEA_NODE_VERSION in apps/server/vite.config.ts.
+      - name: Build CLI single-executable
+        env:
+          VP_NODE_VERSION: "26.8.2"
+        run: node apps/server/scripts/cli.ts build-exe --verbose
+
+      - name: Build resource monitor
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --locked --release \
+            --manifest-path native/resource-monitor/Cargo.toml \
+            --target x86_64-unknown-linux-gnu
+          target_dir="$RUNNER_TEMP/cli-resource-monitor/linux-x64"
+          mkdir -p "$target_dir"
+          cp native/resource-monitor/target/x86_64-unknown-linux-gnu/release/t3-resource-monitor "$target_dir/"
+
+      - name: Build CLI archive
+        run: >-
+          node scripts/build-cli-archive.ts
+          --platform linux
+          --arch x64
+          --version "${{ steps.version.outputs.version }}"
+          --resource-monitor-dir "$RUNNER_TEMP/cli-resource-monitor"
+          --output-dir release-cli
+
+      - name: Smoke-test CLI archive
+        shell: bash
+        run: node scripts/smoke-cli-archive.ts --archive release-cli/* --expect-version "${{ steps.version.outputs.version }}"
+
+      - name: Upload CLI archive
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: cli-linux-x64
+          path: release-cli/*
+          if-no-files-found: error
+          retention-days: 1
+
   build:
     name: Build ${{ matrix.label }}
+    needs: cli_linux
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     strategy:
@@ -86,14 +175,27 @@ jobs:
             exit $code
           }
 
+      - name: Download Linux CLI archive for WSL
+        if: matrix.platform == 'win'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: cli-linux-x64
+          path: wsl-runtime
+
       - name: Build desktop artifact
         shell: bash
-        run: >-
-          vp run dist:desktop:artifact
-          --platform ${{ matrix.platform }}
-          --target ${{ matrix.target }}
-          --arch ${{ matrix.arch }}
-          --verbose
+        run: |
+          set -euo pipefail
+          args=(
+            --platform ${{ matrix.platform }}
+            --target ${{ matrix.target }}
+            --arch ${{ matrix.arch }}
+            --verbose
+          )
+          if [[ "${{ matrix.platform }}" == "win" ]]; then
+            args+=(--wsl-runtime "$GITHUB_WORKSPACE"/wsl-runtime/t3-*-linux-x64.tar.gz)
+          fi
+          vp run dist:desktop:artifact "${args[@]}"
 
       - name: Upload installer
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
