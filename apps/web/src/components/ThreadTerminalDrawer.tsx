@@ -11,6 +11,8 @@ import {
   type TerminalSessionState,
 } from "@t3tools/client-runtime/state/terminal";
 import {
+  PanelBottom,
+  PanelRight,
   Plus,
   Square,
   SquareSplitHorizontal,
@@ -48,7 +50,8 @@ import { Button } from "~/components/ui/button";
 import { PanelTabCloseButton } from "~/components/ui/panel-tab-close-button";
 import { stackedThreadToast, toastManager } from "~/components/ui/toast";
 import { readTextFromClipboard, writeTextToClipboard } from "~/hooks/useCopyToClipboard";
-import { cn } from "~/lib/utils";
+import { cn, isMacPlatform } from "~/lib/utils";
+import { showContextMenuFallback } from "~/contextMenuFallback";
 import { type TerminalContextSelection } from "~/lib/terminalContext";
 import {
   observeSelectionActions,
@@ -847,19 +850,23 @@ export function TerminalViewport({
         }
         const requestId = ++selectionActionRequestIdRef.current;
         openSelectionMenuRequestIdRef.current = requestId;
-        const clicked = await localApi.contextMenu
-          .show(
-            terminalSelectionMenuItems({
-              canAddToChat: canAddSelectionToChat(),
-              addToChatShortcut: readAddToChatShortcut(),
-            }),
-            nextAction.position,
-          )
-          .finally(() => {
-            if (openSelectionMenuRequestIdRef.current === requestId) {
-              openSelectionMenuRequestIdRef.current = null;
-            }
-          });
+        // Outside macOS a native menu swallows the keyboard, so the add-to-chat
+        // shortcut could not fire while it is open; the DOM menu leaves keys
+        // with the terminal.
+        const showMenu = isMacPlatform(navigator.platform)
+          ? localApi.contextMenu.show
+          : showContextMenuFallback;
+        const clicked = await showMenu(
+          terminalSelectionMenuItems({
+            canAddToChat: canAddSelectionToChat(),
+            addToChatShortcut: readAddToChatShortcut(),
+          }),
+          nextAction.position,
+        ).finally(() => {
+          if (openSelectionMenuRequestIdRef.current === requestId) {
+            openSelectionMenuRequestIdRef.current = null;
+          }
+        });
         if (requestId !== selectionActionRequestIdRef.current || clicked === null) {
           return;
         }
@@ -1172,6 +1179,8 @@ interface ThreadTerminalDrawerProps {
   closeShortcutLabel?: string | undefined;
   onActiveTerminalChange: (terminalId: string) => void;
   onCloseTerminal: (terminalId: string) => void;
+  /** Moves the session to the other placement: the bottom drawer from the panel, and back. */
+  onMoveTerminal?: (terminalId: string) => void;
   onHeightChange: (height: number) => void;
   onAddTerminalContext: (selection: TerminalContextSelection) => void;
   keybindings: ResolvedKeybindingsConfig;
@@ -1248,6 +1257,7 @@ export default function ThreadTerminalDrawer({
   closeShortcutLabel,
   onActiveTerminalChange,
   onCloseTerminal,
+  onMoveTerminal,
   onHeightChange,
   onAddTerminalContext,
   keybindings,
@@ -1447,6 +1457,8 @@ export default function ThreadTerminalDrawer({
   const closeTerminalActionLabel = closeShortcutLabel
     ? `Close Terminal (${closeShortcutLabel})`
     : "Close Terminal";
+  const moveTerminalActionLabel = isPanel ? "Move to Bottom Panel" : "Move to Right Panel";
+  const MoveTerminalIcon = isPanel ? PanelBottom : PanelRight;
   const onSplitTerminalAction = useCallback(() => {
     if (!canOperateTerminal || hasReachedSplitLimit) return;
     onSplitTerminal();
@@ -1687,6 +1699,19 @@ export default function ThreadTerminalDrawer({
             >
               <Plus className="size-3.25" />
             </TerminalActionButton>
+            {onMoveTerminal ? (
+              <>
+                <div className="h-4 w-px bg-border/80" />
+                <TerminalActionButton
+                  disabled={!canOperateTerminal}
+                  className="p-1 text-foreground/90 transition-colors hover:bg-accent"
+                  onClick={() => onMoveTerminal(resolvedActiveTerminalId)}
+                  label={moveTerminalActionLabel}
+                >
+                  <MoveTerminalIcon className="size-3.25" />
+                </TerminalActionButton>
+              </>
+            ) : null}
             <div className="h-4 w-px bg-border/80" />
             <TerminalActionButton
               disabled={!canOperateTerminal}
@@ -1834,6 +1859,16 @@ export default function ThreadTerminalDrawer({
                   >
                     <Plus className="size-3.25" />
                   </TerminalActionButton>
+                  {onMoveTerminal ? (
+                    <TerminalActionButton
+                      disabled={!canOperateTerminal}
+                      className="inline-flex h-full items-center border-l border-border/70 px-1 text-foreground/90 transition-colors hover:bg-accent/70"
+                      onClick={() => onMoveTerminal(resolvedActiveTerminalId)}
+                      label={moveTerminalActionLabel}
+                    >
+                      <MoveTerminalIcon className="size-3.25" />
+                    </TerminalActionButton>
+                  ) : null}
                   <TerminalActionButton
                     disabled={!canOperateTerminal}
                     className="inline-flex h-full items-center border-l border-border/70 px-1 text-foreground/90 transition-colors hover:bg-accent/70"

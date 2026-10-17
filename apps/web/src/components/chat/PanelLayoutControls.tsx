@@ -1,4 +1,4 @@
-import { PanelBottomIcon, PanelRightIcon, SquareMenuIcon } from "lucide-react";
+import { PanelRightIcon, SquareMenuIcon, SquareTerminalIcon } from "lucide-react";
 import { Maximize2, Minimize2 } from "lucide";
 import { MorphIcon } from "~/components/MorphIcon";
 import { memo, type ReactElement } from "react";
@@ -90,18 +90,18 @@ export const PanelLayoutControls = memo(function PanelLayoutControls({
               className="shrink-0 [-webkit-app-region:no-drag]"
               pressed={terminalOpen}
               onPressedChange={onToggleTerminal}
-              aria-label="Toggle terminal drawer"
+              aria-label="Toggle terminal"
               variant="ghost"
               size="sm"
               disabled={!terminalAvailable}
             >
-              <PanelBottomIcon className="size-4" />
+              <SquareTerminalIcon className="size-4" />
             </Toggle>
           </TooltipTrigger>
           <TooltipPopup side="bottom">
             {terminalAvailable
-              ? `Toggle terminal drawer${terminalShortcutLabel ? ` (${terminalShortcutLabel})` : ""}`
-              : "Terminal drawer is unavailable"}
+              ? `Toggle terminal${terminalShortcutLabel ? ` (${terminalShortcutLabel})` : ""}`
+              : "Terminal is unavailable"}
           </TooltipPopup>
         </Tooltip>
       ) : null}

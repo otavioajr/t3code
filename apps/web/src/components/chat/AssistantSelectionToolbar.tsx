@@ -8,7 +8,11 @@ import { QuoteIcon } from "lucide-react";
 import { useAtomValue } from "@effect/atom-react";
 import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { isAddSelectionToChatShortcut } from "~/keybindings";
+import {
+  findEffectiveShortcutForCommand,
+  formatShortcutLabel,
+  isAddSelectionToChatShortcut,
+} from "~/keybindings";
 import {
   captureAssistantTextSelection,
   type AssistantCitationSourceAnchor,
@@ -21,6 +25,7 @@ import {
 } from "~/lib/selectionActions";
 import { primaryServerKeybindingsAtom } from "~/state/server";
 import { Button } from "../ui/button";
+import { Kbd } from "../ui/kbd";
 
 export function AssistantSelectionToolbar({
   viewport,
@@ -167,6 +172,9 @@ export function AssistantSelectionToolbar({
 
   if (!selection) return null;
   const tooLong = selection.citation.text.length > ASSISTANT_CITATION_MAX_TEXT_LENGTH;
+  const citeShortcut = findEffectiveShortcutForCommand(keybindings, "chat.addSelection", {
+    context: { previewFocus: false },
+  });
   return createPortal(
     <Button
       ref={toolbarRef}
@@ -189,6 +197,7 @@ export function AssistantSelectionToolbar({
     >
       <QuoteIcon aria-hidden="true" className="size-3.5" />
       {tooLong ? "Shorten selection" : "Cite"}
+      {!tooLong && citeShortcut ? <Kbd>{formatShortcutLabel(citeShortcut)}</Kbd> : null}
     </Button>,
     document.body,
   );

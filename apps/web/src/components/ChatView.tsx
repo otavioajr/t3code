@@ -412,6 +412,7 @@ import { environmentCatalog } from "../connection/catalog";
 import { isDesktopLocalConnectionTarget } from "../connection/desktopLocal";
 import { useEnvironmentDisconnectDelay } from "../hooks/useEnvironmentDisconnectDelay";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
+import { moveTerminalToDrawer, moveTerminalToRightPanel } from "../terminalPlacement";
 import { useKnownTerminalSessions, useThreadRunningTerminalIds } from "../state/terminalSessions";
 import { useEnvironmentQuery } from "../state/query";
 import { useEnvironmentScope } from "~/state/session";
@@ -1317,6 +1318,11 @@ const PersistentThreadTerminalDrawer = memo(function PersistentThreadTerminalDra
     ],
   );
 
+  const moveToRightPanel = useCallback(
+    (terminalId: string) => moveTerminalToRightPanel(threadRef, terminalId),
+    [threadRef],
+  );
+
   const handleAddTerminalContext = useCallback(
     (selection: TerminalContextSelection) => {
       if (!visible) {
@@ -1366,6 +1372,7 @@ const PersistentThreadTerminalDrawer = memo(function PersistentThreadTerminalDra
           keybindings={keybindings}
           onActiveTerminalChange={activateTerminal}
           onCloseTerminal={closeTerminal}
+          onMoveTerminal={moveToRightPanel}
           onHeightChange={setTerminalHeight}
           onAddTerminalContext={handleAddTerminalContext}
           terminalLabelsById={terminalLabelsById}
@@ -1507,6 +1514,11 @@ const PersistentThreadTerminalPanel = memo(function PersistentThreadTerminalPane
     threadWorktreePath,
   ]);
 
+  const moveToDrawer = useCallback(
+    (terminalId: string) => moveTerminalToDrawer(threadRef, terminalId),
+    [threadRef],
+  );
+
   if (!project || !cwd) return null;
 
   return (
@@ -1539,6 +1551,7 @@ const PersistentThreadTerminalPanel = memo(function PersistentThreadTerminalPane
       closeShortcutLabel={closeShortcutLabel}
       onActiveTerminalChange={onActiveTerminalChange}
       onCloseTerminal={onCloseTerminal}
+      onMoveTerminal={moveToDrawer}
       onHeightChange={() => undefined}
       onAddTerminalContext={onAddTerminalContext}
       terminalLabelsById={terminalLabelsById}
@@ -6173,6 +6186,29 @@ export default function ChatView(props: ChatViewProps) {
     }
     useRightPanelStore.getState().toggleVisibility(activeThreadRef);
   }, [activeThreadRef, closePreviewPanel, rightPanelOpen]);
+  // Terminals open in the right panel; the bottom drawer is reached from a panel terminal's
+  // "Move to Bottom Panel" action.
+  const toggleRightPanelTerminal = useCallback(() => {
+    if (!activeThreadRef) return;
+    if (rightPanelOpen && activeRightPanelSurface?.kind === "terminal") {
+      closePreviewPanel();
+      return;
+    }
+    const existingSurface = rightPanelState.surfaces.find((surface) => surface.kind === "terminal");
+    if (existingSurface) {
+      useRightPanelStore.getState().activateSurface(activeThreadRef, existingSurface.id);
+      setTerminalFocusRequestId((value) => value + 1);
+      return;
+    }
+    addTerminalSurface();
+  }, [
+    activeRightPanelSurface?.kind,
+    activeThreadRef,
+    addTerminalSurface,
+    closePreviewPanel,
+    rightPanelOpen,
+    rightPanelState.surfaces,
+  ]);
   const toggleThreadPanel = useCallback(() => {
     if (!activeThreadRef) return;
     useRightPanelStore.getState().toggleThreadPanel(activeThreadRef, threadPanelPresentation);
@@ -8234,10 +8270,18 @@ export default function ChatView(props: ChatViewProps) {
       }
 
       if (command === "terminal.toggle") {
-        if (!terminalUiState.terminalOpen && !canReadTerminal && !canOperateTerminal) return;
+        // A focused drawer terminal hides its drawer; everywhere else the shortcut
+        // toggles the right panel terminal.
+        if (terminalFocusOwner === "drawer") {
+          event.preventDefault();
+          event.stopPropagation();
+          toggleTerminalVisibility();
+          return;
+        }
+        if (!canReadTerminal && !canOperateTerminal) return;
         event.preventDefault();
         event.stopPropagation();
-        toggleTerminalVisibility();
+        toggleRightPanelTerminal();
         return;
       }
 
@@ -8503,6 +8547,7 @@ export default function ChatView(props: ChatViewProps) {
     toggleRightPanelMaximized,
     toggleThreadPanel,
     toggleTerminalVisibility,
+    toggleRightPanelTerminal,
     composerRef,
     draftId,
     environmentId,
@@ -11552,7 +11597,7 @@ export default function ChatView(props: ChatViewProps) {
   };
   const panelToggleControlProps = {
     terminalAvailable: activeProject !== null,
-    terminalOpen: terminalUiState.terminalOpen,
+    terminalOpen: rightPanelOpen && activeRightPanelSurface?.kind === "terminal",
     terminalShortcutLabel: shortcutLabelForCommand(keybindings, "terminal.toggle"),
     threadPanelOpen,
     threadPanelPresentation,
@@ -11561,7 +11606,7 @@ export default function ChatView(props: ChatViewProps) {
     rightPanelAvailable: activeProject !== null,
     rightPanelOpen,
     rightPanelShortcutLabel: shortcutLabelForCommand(keybindings, "rightPanel.toggle"),
-    onToggleTerminal: toggleTerminalVisibility,
+    onToggleTerminal: toggleRightPanelTerminal,
     onToggleThreadPanel: toggleThreadPanel,
     onToggleRightPanel: toggleRightPanel,
   } satisfies PanelLayoutControlsProps;
