@@ -277,7 +277,7 @@ describe("ChatMarkdown favicon privacy", () => {
 });
 
 describe("ChatMarkdown streaming", () => {
-  it("runs only a complete single-line shell block after a click", async () => {
+  it("runs only a complete command block after a click", async () => {
     vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
     const onRunShellCommand = vi.fn();
     let renderer: ReactTestRenderer | undefined;
@@ -312,6 +312,9 @@ describe("ChatMarkdown streaming", () => {
         "~~~bash\necho tilde\n~~~",
         "> ```bash\n> echo quote\n> ```",
         "````bash\necho four\n````",
+        "```\necho unlabeled\n```",
+        "```bash\necho one\necho two\n```",
+        "```bash\necho hello\n\n```",
       ]) {
         await act(async () => {
           mounted.update(message(text));
@@ -320,10 +323,8 @@ describe("ChatMarkdown streaming", () => {
       }
 
       for (const text of [
-        "```bash\necho one\necho two\n```",
         "```typescript\necho hello\n```",
         "```bash\n\n```",
-        "```bash\necho hello\n\n```",
         "```bash\necho hello\\\n```",
         "```bash\necho safe \u202e#\n```",
         "```bash\necho incomplete",

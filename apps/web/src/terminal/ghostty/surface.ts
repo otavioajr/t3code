@@ -1,4 +1,4 @@
-import { isMacPlatform } from "../../lib/utils";
+import { isMacPlatform, isWindowsPlatform } from "../../lib/utils";
 import { SELECTION_MULTI_CLICK_INTERVAL_MS } from "../../lib/selectionActions";
 import { collectWrappedTerminalLinkLine, extractTerminalLinks } from "../../terminal-links";
 import {
@@ -393,7 +393,9 @@ export function isTerminalPasteShortcut(
     return event.shiftKey && !event.ctrlKey && !event.metaKey;
   }
   if (key !== "v") return false;
-  return isMacPlatform(platform) ? event.metaKey : event.ctrlKey && event.shiftKey;
+  if (isMacPlatform(platform)) return event.metaKey;
+  // Windows terminals paste on plain Ctrl+V; elsewhere Ctrl+V stays the shell's literal-next.
+  return event.ctrlKey && (event.shiftKey || isWindowsPlatform(platform));
 }
 
 /**

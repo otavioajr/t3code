@@ -1248,6 +1248,12 @@ describe("isTerminalPasteShortcut", () => {
     );
   });
 
+  it("pastes on Ctrl+V and Ctrl+Shift+V on Windows", () => {
+    expect(isTerminalPasteShortcut(event({ ctrlKey: true }), "Win32")).toBe(true);
+    expect(isTerminalPasteShortcut(event({ ctrlKey: true, shiftKey: true }), "Win32")).toBe(true);
+    expect(isTerminalPasteShortcut(event(), "Win32")).toBe(false);
+  });
+
   it("supports the conventional Shift+Insert paste shortcut", () => {
     expect(isTerminalPasteShortcut(event({ key: "Insert", shiftKey: true }), "Linux x86_64")).toBe(
       true,

@@ -235,7 +235,6 @@ import {
 } from "../proposedPlan";
 import {
   DEFAULT_INTERACTION_MODE,
-  DEFAULT_THREAD_TERMINAL_ID,
   MAX_TERMINALS_PER_GROUP,
   type ChatMessage,
   isBrowserPreviewAttachment,
@@ -2055,7 +2054,6 @@ export default function ChatView(props: ChatViewProps) {
   const storeSplitTerminal = useTerminalUiStateStore((s) => s.splitTerminal);
   const storeSplitTerminalVertical = useTerminalUiStateStore((s) => s.splitTerminalVertical);
   const storeNewTerminal = useTerminalUiStateStore((s) => s.newTerminal);
-  const storeSetActiveTerminal = useTerminalUiStateStore((s) => s.setActiveTerminal);
   const storeCloseTerminal = useTerminalUiStateStore((s) => s.closeTerminal);
   const serverThreadRefs = useThreadRefs();
   const serverThreadKeys = useMemo(() => serverThreadRefs.map(scopedThreadKey), [serverThreadRefs]);
@@ -5108,12 +5106,17 @@ export default function ChatView(props: ChatViewProps) {
         });
       }
       const targetCwd = options?.cwd ?? gitCwd ?? activeProject.workspaceRoot;
+      // Scripts run in the right panel: reuse its idle terminal, else open a new tab.
+      const panelTerminalSurface =
+        activeRightPanelSurface?.kind === "terminal"
+          ? activeRightPanelSurface
+          : rightPanelState.surfaces.find((surface) => surface.kind === "terminal");
       const baseTerminalId =
-        terminalUiState.activeTerminalId || activeKnownTerminalIds[0] || DEFAULT_THREAD_TERMINAL_ID;
-      const isBaseTerminalBusy = runningTerminalIds.includes(baseTerminalId);
-      const wantsNewTerminal = Boolean(options?.preferNewTerminal) || isBaseTerminalBusy;
+        panelTerminalSurface?.kind === "terminal" ? panelTerminalSurface.activeTerminalId : null;
       const shouldCreateNewTerminal =
-        wantsNewTerminal ||
+        baseTerminalId === null ||
+        Boolean(options?.preferNewTerminal) ||
+        runningTerminalIds.includes(baseTerminalId) ||
         !canReuseTerminal ||
         !readEnvironmentScope(environmentId, AuthTerminalReadScope);
       const targetWorktreePath = options?.worktreePath ?? activeThread.worktreePath ?? null;
@@ -5123,7 +5126,6 @@ export default function ChatView(props: ChatViewProps) {
         cwd: targetCwd,
         worktreePath: targetWorktreePath,
       });
-      setTerminalOpen(true);
       if (!activeThreadRef) {
         return;
       }
@@ -5136,7 +5138,8 @@ export default function ChatView(props: ChatViewProps) {
         worktreePath: targetWorktreePath,
         ...(options?.env ? { extraEnv: options.env } : {}),
       });
-      const targetTerminalId = shouldCreateNewTerminal ? allocateTerminalId() : baseTerminalId;
+      const targetTerminalId =
+        shouldCreateNewTerminal || baseTerminalId === null ? allocateTerminalId() : baseTerminalId;
       const openTerminalInput: TerminalOpenInput = shouldCreateNewTerminal
         ? {
             threadId: activeThreadId,
@@ -5155,10 +5158,12 @@ export default function ChatView(props: ChatViewProps) {
             env: runtimeEnv,
           };
 
-      if (shouldCreateNewTerminal) {
-        storeNewTerminal(activeThreadRef, targetTerminalId);
+      const panels = useRightPanelStore.getState();
+      if (shouldCreateNewTerminal || !panelTerminalSurface) {
+        panels.openTerminal(activeThreadRef, targetTerminalId);
       } else {
-        storeSetActiveTerminal(activeThreadRef, targetTerminalId);
+        panels.activateTerminal(activeThreadRef, panelTerminalSurface.id, targetTerminalId);
+        panels.activateSurface(activeThreadRef, panelTerminalSurface.id);
       }
 
       const openResult = await openTerminal({ environmentId, input: openTerminalInput });
@@ -5216,20 +5221,17 @@ export default function ChatView(props: ChatViewProps) {
       activeThreadId,
       activeThreadRef,
       gitCwd,
-      setTerminalOpen,
       setThreadError,
-      storeNewTerminal,
-      storeSetActiveTerminal,
       setLastInvokedScriptByProjectId,
       environmentId,
       openTerminal,
       openPreview,
       hasTerminalWriteAccess,
-      activeKnownTerminalIds,
+      activeRightPanelSurface,
+      rightPanelState.surfaces,
       canReuseTerminal,
       allocateTerminalId,
       runningTerminalIds,
-      terminalUiState.activeTerminalId,
       writeTerminal,
     ],
   );
