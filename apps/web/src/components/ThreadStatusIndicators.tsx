@@ -15,8 +15,9 @@ import {
   type VcsStatusResult,
 } from "@t3tools/contracts";
 import { Atom } from "effect/reactivity";
-import { FolderGit2Icon, TerminalIcon } from "lucide-react";
-import { useCallback, useMemo } from "react";
+import { CircleCheckIcon, FolderGit2Icon, TerminalIcon } from "lucide-react";
+import { useCallback, useEffect, useMemo } from "react";
+import { create } from "zustand";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { useEnvironment, usePrimaryEnvironmentId } from "../state/environments";
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
@@ -788,22 +789,69 @@ export function synchronizeTerminalPulse(event: AnimationEvent<SVGSVGElement>) {
   }
 }
 
+// Last seen terminal activity per thread, kept outside rows so a row that
+// scrolls out and back in still notices a command that finished meanwhile.
+const lastTerminalActivityByThread = new Map<string, { count: number; terminalId: string }>();
+const useFinishedTerminalThreads = create<{ finished: ReadonlyMap<string, string> }>(() => ({
+  finished: new Map(),
+}));
+
+function setTerminalFinished(threadKey: string, terminalId: string | null) {
+  useFinishedTerminalThreads.setState((state) => {
+    if ((state.finished.get(threadKey) ?? null) === terminalId) return state;
+    const finished = new Map(state.finished);
+    if (terminalId === null) finished.delete(threadKey);
+    else finished.set(threadKey, terminalId);
+    return { finished };
+  });
+}
+
+/** Terminal of the thread whose command finished since the thread was last open. */
+function useFinishedTerminalId(
+  threadKey: string,
+  terminalIds: readonly string[],
+  isActive: boolean,
+): string | null {
+  const finishedTerminalId = useFinishedTerminalThreads(
+    (state) => state.finished.get(threadKey) ?? null,
+  );
+  const count = terminalIds.length;
+  const firstTerminalId = terminalIds[0];
+  useEffect(() => {
+    const previous = lastTerminalActivityByThread.get(threadKey);
+    if (firstTerminalId !== undefined) {
+      lastTerminalActivityByThread.set(threadKey, { count, terminalId: firstTerminalId });
+    } else {
+      lastTerminalActivityByThread.delete(threadKey);
+    }
+    if (count > 0 || isActive) setTerminalFinished(threadKey, null);
+    else if (previous) setTerminalFinished(threadKey, previous.terminalId);
+  }, [threadKey, count, firstTerminalId, isActive]);
+  return count === 0 ? finishedTerminalId : null;
+}
+
 export function ThreadTerminalStatusButton({
   threadRef,
   terminalIds,
+  isActive,
   onThreadActivate,
 }: {
   threadRef: ScopedThreadRef;
   terminalIds: readonly string[];
+  isActive: boolean;
   onThreadActivate: (threadRef: ScopedThreadRef) => void;
 }) {
-  const terminalId = terminalIds[0];
-  if (terminalId === undefined) return null;
-  const status = terminalStatusFromRunningIds(terminalIds);
+  const threadKey = scopedThreadKey(threadRef);
+  const finishedTerminalId = useFinishedTerminalId(threadKey, terminalIds, isActive);
+  const terminalId = terminalIds[0] ?? finishedTerminalId;
+  if (terminalId === null) return null;
+  const count = terminalIds.length;
   const label =
-    terminalIds.length === 1
-      ? "1 terminal process running. Open terminal"
-      : `${terminalIds.length} terminal processes running. Open terminal`;
+    count === 0
+      ? "Terminal command finished. Open terminal"
+      : count === 1
+        ? "1 terminal process running. Open terminal"
+        : `${count} terminal processes running. Open terminal`;
   return (
     <Tooltip>
       <TooltipTrigger
@@ -813,24 +861,32 @@ export function ThreadTerminalStatusButton({
             aria-label={label}
             data-testid={`sidebar-terminal-status-${threadRef.threadId}`}
             className={cn(
-              "inline-flex shrink-0 cursor-pointer items-center justify-center rounded-sm outline-none hover:opacity-80 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
-              status?.colorClass,
+              "inline-flex shrink-0 cursor-pointer items-center justify-center gap-0.5 rounded-sm outline-none hover:opacity-80 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+              count === 0 ? "text-success" : terminalStatusFromRunningIds(terminalIds)?.colorClass,
             )}
             onPointerDown={(event) => event.stopPropagation()}
             onKeyDown={(event) => event.stopPropagation()}
             onClick={(event) => {
               event.preventDefault();
               event.stopPropagation();
+              setTerminalFinished(threadKey, null);
               revealThreadTerminal(threadRef, terminalId);
               onThreadActivate(threadRef);
             }}
           />
         }
       >
-        <TerminalIcon
-          className="size-3.5 motion-safe:animate-status-pulse"
-          onAnimationStart={synchronizeTerminalPulse}
-        />
+        {count === 0 ? (
+          <CircleCheckIcon className="size-3.5" />
+        ) : (
+          <>
+            <TerminalIcon
+              className="size-3.5 motion-safe:animate-status-pulse"
+              onAnimationStart={synchronizeTerminalPulse}
+            />
+            <span className="text-3xs font-medium tabular-nums">{count}</span>
+          </>
+        )}
       </TooltipTrigger>
       <TooltipPopup side="top">{label}</TooltipPopup>
     </Tooltip>

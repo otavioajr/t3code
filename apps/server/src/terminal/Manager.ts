@@ -307,6 +307,9 @@ interface TerminalSessionState {
   hasRunningSubprocess: boolean;
   /** Normalized child command name when `hasRunningSubprocess`; cleared when idle. */
   childCommandLabel: string | null;
+  /** Line editors turn bracketed paste on while they wait for input, also over ssh. */
+  bracketedPaste: boolean;
+  altScreen: boolean;
   runtimeEnv: Record<string, string> | null;
 }
 
@@ -347,6 +350,44 @@ interface TerminalManagerState {
 function truncateTerminalWireLabel(value: string): string {
   if (value.length <= MAX_TERMINAL_LABEL_LENGTH) return value;
   return value.slice(0, MAX_TERMINAL_LABEL_LENGTH);
+}
+
+// Remote shell clients stay alive between commands, so the process table alone
+// reports them as always busy.
+const REMOTE_SHELL_COMMANDS = new Set(["ssh", "mosh-client"]);
+
+/** Tracks the input modes that show whether the shell at the far end waits for a command. */
+export function nextTerminalInputModes(
+  current: { readonly bracketedPaste: boolean; readonly altScreen: boolean },
+  data: string,
+): { bracketedPaste: boolean; altScreen: boolean } {
+  const lastToggle = (on: ReadonlyArray<string>, off: ReadonlyArray<string>, value: boolean) => {
+    const onIndex = Math.max(...on.map((sequence) => data.lastIndexOf(sequence)));
+    const offIndex = Math.max(...off.map((sequence) => data.lastIndexOf(sequence)));
+    return onIndex === offIndex ? value : onIndex > offIndex;
+  };
+  return {
+    bracketedPaste: lastToggle(["\x1b[?2004h"], ["\x1b[?2004l"], current.bracketedPaste),
+    altScreen: lastToggle(
+      ["\x1b[?1049h", "\x1b[?1047h", "\x1b[?47h"],
+      ["\x1b[?1049l", "\x1b[?1047l", "\x1b[?47l"],
+      current.altScreen,
+    ),
+  };
+}
+
+/** A remote shell sitting at its prompt is idle even though its client process runs. */
+export function isTerminalBusy(
+  inspect: { readonly hasRunningSubprocess: boolean; readonly childCommand: string | null },
+  modes: { readonly bracketedPaste: boolean; readonly altScreen: boolean },
+): boolean {
+  if (!inspect.hasRunningSubprocess) return false;
+  const remoteShellAtPrompt =
+    inspect.childCommand !== null &&
+    REMOTE_SHELL_COMMANDS.has(inspect.childCommand) &&
+    modes.bracketedPaste &&
+    !modes.altScreen;
+  return !remoteShellAtPrompt;
 }
 
 function normalizeChildCommandName(raw: string, platform: NodeJS.Platform): string | null {
@@ -2051,6 +2092,9 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
             nextEvent.data,
           );
           session.pendingHistoryControlSequence = sanitized.pendingControlSequence;
+          const modes = nextTerminalInputModes(session, nextEvent.data);
+          session.bracketedPaste = modes.bracketedPaste;
+          session.altScreen = modes.altScreen;
           if (sanitized.visibleText.length > 0) {
             session.history.append(sanitized.visibleText);
           }
@@ -2248,6 +2292,8 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
       session.exitSignal = null;
       session.hasRunningSubprocess = false;
       session.childCommandLabel = null;
+      session.bracketedPaste = false;
+      session.altScreen = false;
       session.pendingProcessEvents = [];
       session.pendingProcessEventIndex = 0;
       session.processEventDrainRunning = false;
@@ -2496,7 +2542,6 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
         terminalId: session.terminalId,
         processIds: next.processIds,
       });
-      const nextChildLabel = next.hasRunningSubprocess ? next.childCommand : null;
       const event = yield* modifyManagerState((state) => {
         const liveSession: Option.Option<TerminalSessionState> = Option.fromNullishOr(
           state.sessions.get(toSessionKey(session.threadId, session.terminalId)),
@@ -2504,14 +2549,20 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
         if (
           Option.isNone(liveSession) ||
           liveSession.value.status !== "running" ||
-          liveSession.value.pid !== terminalPid ||
-          (liveSession.value.hasRunningSubprocess === next.hasRunningSubprocess &&
-            liveSession.value.childCommandLabel === nextChildLabel)
+          liveSession.value.pid !== terminalPid
+        ) {
+          return [Option.none(), state] as const;
+        }
+        const busy = isTerminalBusy(next, liveSession.value);
+        const nextChildLabel = busy ? next.childCommand : null;
+        if (
+          liveSession.value.hasRunningSubprocess === busy &&
+          liveSession.value.childCommandLabel === nextChildLabel
         ) {
           return [Option.none(), state] as const;
         }
 
-        liveSession.value.hasRunningSubprocess = next.hasRunningSubprocess;
+        liveSession.value.hasRunningSubprocess = busy;
         liveSession.value.childCommandLabel = nextChildLabel;
         const eventStamp = advanceEventSequence(liveSession.value);
 
@@ -2521,7 +2572,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
             threadId: liveSession.value.threadId,
             terminalId: liveSession.value.terminalId,
             sequence: eventStamp.sequence,
-            hasRunningSubprocess: next.hasRunningSubprocess,
+            hasRunningSubprocess: busy,
             label: terminalWireLabel(liveSession.value),
           }),
           state,
@@ -2636,6 +2687,8 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
         unsubscribeExit: null,
         hasRunningSubprocess: false,
         childCommandLabel: null,
+        bracketedPaste: false,
+        altScreen: false,
         runtimeEnv: normalizedRuntimeEnv(input.env),
       };
 
@@ -3076,6 +3129,8 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
           unsubscribeExit: null,
           hasRunningSubprocess: false,
           childCommandLabel: null,
+          bracketedPaste: false,
+          altScreen: false,
           runtimeEnv: normalizedRuntimeEnv(input.env),
         };
         const createdSession = session;

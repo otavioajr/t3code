@@ -866,6 +866,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
           <ThreadTerminalStatusButton
             threadRef={threadRef}
             terminalIds={runningTerminalIds}
+            isActive={isActive}
             onThreadActivate={navigateToThread}
           />
           <div

@@ -1056,6 +1056,52 @@ it.layer(
     }),
   );
 
+  it.effect("treats an ssh session waiting at its remote prompt as idle", () =>
+    Effect.gen(function* () {
+      const { manager, ptyAdapter, getEvents } = yield* createManager(5, {
+        subprocessInspector: () =>
+          Effect.succeed({ hasRunningSubprocess: true, childCommand: "ssh", processIds: [100] }),
+        subprocessPollIntervalMs: 20,
+      });
+      yield* manager.open(openInput());
+      const process = ptyAdapter.processes[0];
+      if (!process) return expect.unreachable();
+      const lastActivity = Effect.map(getEvents, (events) =>
+        events.findLast((event) => event.type === "activity"),
+      );
+
+      yield* waitFor(
+        Effect.map(lastActivity, (event) => event?.hasRunningSubprocess === true),
+        "1200 millis",
+      );
+      process.emitData("user@host:~$ \x1b[?2004h");
+      yield* waitFor(
+        Effect.map(lastActivity, (event) => event?.hasRunningSubprocess === false),
+        "1200 millis",
+      );
+      process.emitData("\x1b[?2004l\r\nbuilding...");
+      yield* waitFor(
+        Effect.map(lastActivity, (event) => event?.hasRunningSubprocess === true),
+        "1200 millis",
+      );
+    }),
+  );
+
+  it("keeps full-screen programs over ssh busy", () => {
+    // vim enables bracketed paste too, but inside the alternate screen.
+    const modes = TerminalManager.nextTerminalInputModes(
+      { bracketedPaste: false, altScreen: false },
+      "\x1b[?2004h\x1b[?1049h\x1b[?2004h",
+    );
+    const ssh = { hasRunningSubprocess: true, childCommand: "ssh" };
+    expect(TerminalManager.isTerminalBusy(ssh, modes)).toBe(true);
+    const back = TerminalManager.nextTerminalInputModes(modes, "\x1b[?1049l");
+    expect(TerminalManager.isTerminalBusy(ssh, back)).toBe(false);
+    expect(
+      TerminalManager.isTerminalBusy({ hasRunningSubprocess: true, childCommand: "claude" }, back),
+    ).toBe(true);
+  });
+
   it.effect("emits subprocess activity events when child-process state changes", () =>
     Effect.gen(function* () {
       let inspect: {
