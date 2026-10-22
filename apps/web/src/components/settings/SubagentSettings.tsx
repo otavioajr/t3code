@@ -7,6 +7,7 @@ import {
   deriveProviderInstanceEntries,
   sortProviderInstanceEntries,
 } from "../../providerInstances";
+import { useEnvironmentProviders } from "../../state/environments";
 import { EMPTY_SERVER_PROVIDERS } from "../../state/server";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
 import { TraitsPicker } from "../chat/TraitsPicker";
@@ -34,7 +35,10 @@ function SubagentModelRow({
   const updateSettings = useUpdateScopedSettings();
   const mixed = useScopedSettingsMixed([settingKey]);
   const { environment, target } = useSettingsScope();
-  const providers = environment?.serverConfig?.providers ?? EMPTY_SERVER_PROVIDERS;
+  const providersByEnvironment = useEnvironmentProviders();
+  const providers =
+    (environment ? providersByEnvironment.get(environment.environmentId) : undefined) ??
+    EMPTY_SERVER_PROVIDERS;
   const entries = sortProviderInstanceEntries(
     applyProviderInstanceSettings(
       deriveProviderInstanceEntries(providers),
@@ -119,8 +123,6 @@ function SubagentModelRow({
               provider={entry.driverKind}
               models={entry.models}
               model={active.model}
-              prompt=""
-              onPromptChange={() => {}}
               modelOptions={active.options ?? []}
               allowPromptInjectedEffort={false}
               planModeEnabled={settings.planModeEnabled || selectsPlanAgent(active.options)}

@@ -10,10 +10,13 @@ import type {
 import { normalizeModelSlug } from "@t3tools/shared/model";
 import { proposedPlanTitle, stripDisplayedPlanMarkdown } from "@t3tools/shared/proposedPlanText";
 import { ChevronDownIcon, ChevronRightIcon } from "lucide-react";
-import { memo, useMemo, useState } from "react";
+import { memo, useState } from "react";
 
 import type { ComposerThreadTarget } from "../../composerDraftStore";
-import { useEffectiveComposerModelState } from "../../composerDraftStore";
+import {
+  deriveEffectiveComposerModelState,
+  useComposerDraftModelState,
+} from "../../composerDraftStore";
 import { getAppModelOptionsForInstance, type AppModelOption } from "../../modelSelection";
 import type { ProviderInstanceEntry } from "../../providerInstances";
 import type { UnifiedSettings } from "@t3tools/contracts/settings";
@@ -66,12 +69,8 @@ export interface PlanPanelModelPickerInput {
   instanceEntries: ReadonlyArray<ProviderInstanceEntry>;
   selectedInstanceId: ProviderInstanceId | null;
   selectedProvider: ProviderDriverKind;
-  threadModelSelection: Parameters<
-    typeof useEffectiveComposerModelState
-  >[0]["threadModelSelection"];
-  projectModelSelection: Parameters<
-    typeof useEffectiveComposerModelState
-  >[0]["projectModelSelection"];
+  threadModelSelection: ModelSelection | null | undefined;
+  projectModelSelection: ModelSelection | null | undefined;
   lockedProvider: ProviderDriverKind | null;
   lockedContinuationGroupKey: string | null;
   keybindings: ResolvedKeybindingsConfig;
@@ -86,8 +85,9 @@ const PlanModelPicker = memo(function PlanModelPicker(
     onChoose: (choice: PlanBuildChoice) => void;
   },
 ) {
-  const { selectedModel, modelOptions: composerModelOptions } = useEffectiveComposerModelState({
-    threadRef: props.composerDraftTarget,
+  const draftModelState = useComposerDraftModelState(props.composerDraftTarget);
+  const { selectedModel, modelOptions: composerModelOptions } = deriveEffectiveComposerModelState({
+    draft: draftModelState,
     providers: props.providers,
     selectedProvider: props.selectedProvider,
     selectedInstanceId: props.selectedInstanceId,
@@ -107,22 +107,17 @@ const PlanModelPicker = memo(function PlanModelPicker(
     : activeInstanceId === null
       ? undefined
       : composerModelOptions?.[activeInstanceId];
-  const modelOptionsByInstance = useMemo<
-    ReadonlyMap<ProviderInstanceId, ReadonlyArray<AppModelOption>>
-  >(() => {
-    const out = new Map<ProviderInstanceId, ReadonlyArray<AppModelOption>>();
-    for (const entry of props.instanceEntries) {
-      out.set(
-        entry.instanceId,
-        getAppModelOptionsForInstance(
-          props.settings,
-          entry,
-          entry.instanceId === activeInstanceId ? activeModel : null,
-        ),
-      );
-    }
-    return out;
-  }, [props.instanceEntries, activeInstanceId, props.settings, activeModel]);
+  const modelOptionsByInstance = new Map<ProviderInstanceId, ReadonlyArray<AppModelOption>>();
+  for (const entry of props.instanceEntries) {
+    modelOptionsByInstance.set(
+      entry.instanceId,
+      getAppModelOptionsForInstance(
+        props.settings,
+        entry,
+        entry.instanceId === activeInstanceId ? activeModel : null,
+      ),
+    );
+  }
 
   if (activeInstanceId === null) return null;
   const currentOptions = modelOptionsByInstance.get(activeInstanceId) ?? [];
@@ -166,8 +161,6 @@ const PlanModelPicker = memo(function PlanModelPicker(
           instanceId={activeEntry.instanceId}
           models={activeEntry.models}
           model={model}
-          prompt=""
-          onPromptChange={() => {}}
           modelOptions={activeTraitOptions}
           allowPromptInjectedEffort={false}
           planModeEnabled={props.settings.planModeEnabled}
@@ -228,10 +221,7 @@ export const PlanPanel = memo(function PlanPanel({
     else onBuild(picked);
   };
   const title = planMarkdown === null ? null : (proposedPlanTitle(planMarkdown) ?? null);
-  const displayedMarkdown = useMemo(
-    () => (planMarkdown === null ? "" : stripDisplayedPlanMarkdown(planMarkdown)),
-    [planMarkdown],
-  );
+  const displayedMarkdown = planMarkdown === null ? "" : stripDisplayedPlanMarkdown(planMarkdown);
 
   return (
     <div className="flex size-full min-h-0 min-w-0 flex-col" data-plan-panel="true">

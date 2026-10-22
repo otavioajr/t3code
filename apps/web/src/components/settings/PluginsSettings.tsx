@@ -1,15 +1,7 @@
 import { useAtomValue } from "@effect/atom-react";
 import { useNavigate } from "@tanstack/react-router";
 import { InfoIcon, LockIcon, PlugIcon, PlusIcon, TriangleAlertIcon } from "lucide-react";
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type FormEvent,
-  type ReactNode,
-} from "react";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import {
   ProviderDriverKind,
   type EnvironmentId,
@@ -25,6 +17,7 @@ import {
 } from "@t3tools/client-runtime/state/runtime";
 
 import { ensureLocalApi } from "../../localApi";
+import { useStableCallback } from "../../hooks/useStableCallback";
 import { EMPTY_SERVER_PROVIDERS, serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "../ui/alert";
@@ -81,12 +74,8 @@ type PluginsSelection = ProviderInstanceId | typeof ALL_PROVIDERS;
  */
 export function PluginsSettings({ environmentId }: { readonly environmentId: EnvironmentId }) {
   const serverProviders = useAtomValue(serverEnvironment.providersValueAtom(environmentId));
-  const pluginInstances = useMemo(
-    () =>
-      (serverProviders ?? EMPTY_SERVER_PROVIDERS).filter((provider) =>
-        PLUGIN_DRIVERS.has(provider.driver),
-      ),
-    [serverProviders],
+  const pluginInstances = (serverProviders ?? EMPTY_SERVER_PROVIDERS).filter((provider) =>
+    PLUGIN_DRIVERS.has(provider.driver),
   );
   // With more than one provider the page opens on All, which manages every one at once.
   const [selection, setSelection] = useState<PluginsSelection | null>(null);
@@ -325,14 +314,15 @@ function PluginsInstancePanel({
   const mutationsLandedRef = useRef(0);
 
   // A row that left the list takes its failure with it, so re-adding it starts clean.
-  const applySnapshot = useCallback((next: ProviderPluginsSnapshot) => {
+  const applySnapshot = (next: ProviderPluginsSnapshot) => {
     const vanished = vanishedPluginTargets(snapshotRef.current, next);
     snapshotRef.current = next;
     setSnapshot(next);
     if (vanished.size > 0) setErrors((current) => withoutTargets(current, vanished));
-  }, []);
+  };
 
-  const requestPlugins = useCallback(async () => {
+  // The panel is keyed by instance, so the load effect runs once per provider.
+  const requestPlugins = useStableCallback(async () => {
     const mutationsBefore = mutationsLandedRef.current;
     const result = await listPlugins({ environmentId, input: { instanceId } });
     if (result._tag === "Success") {
@@ -341,7 +331,7 @@ function PluginsInstancePanel({
     } else if (!isAtomCommandInterrupted(result)) {
       setLoadFailure(describePluginsFailure("load", squashAtomCommandFailure(result)));
     }
-  }, [applySnapshot, environmentId, instanceId, listPlugins]);
+  });
 
   useEffect(() => {
     // oxlint-disable-next-line react/set-state-in-effect -- State changes only after the list response arrives.
@@ -351,14 +341,14 @@ function PluginsInstancePanel({
   // A marketplace added from the All row changed this provider's list outside the panel.
   const lastReloadSignalRef = useRef(reloadSignal);
 
-  const refreshPlugins = useCallback(async () => {
+  const refreshPlugins = useStableCallback(async () => {
     if (loadingRef.current) return;
     loadingRef.current = true;
     setLoading(true);
     await requestPlugins();
     loadingRef.current = false;
     setLoading(false);
-  }, [requestPlugins]);
+  });
 
   useEffect(() => {
     if (lastReloadSignalRef.current === reloadSignal) return;
@@ -366,96 +356,74 @@ function PluginsInstancePanel({
     void refreshPlugins();
   }, [refreshPlugins, reloadSignal]);
 
-  const dispatch = useCallback(
-    (action: PluginAction): Promise<AtomCommandResult<ProviderPluginsSnapshot, unknown>> => {
-      switch (action.kind) {
-        case "add-marketplace":
-          return addMarketplace({ environmentId, input: { instanceId, source: action.source } });
-        case "update-marketplace":
-          return updateMarketplace({
-            environmentId,
-            input: { instanceId, marketplace: action.marketplace },
-          });
-        case "remove-marketplace":
-          return removeMarketplace({
-            environmentId,
-            input: { instanceId, marketplace: action.marketplace },
-          });
-        case "install-plugin":
-          return installPlugin({ environmentId, input: { instanceId, pluginId: action.pluginId } });
-        case "uninstall-plugin":
-          return uninstallPlugin({
-            environmentId,
-            input: { instanceId, pluginId: action.pluginId },
-          });
-        case "set-plugin-enabled":
-          return setPluginEnabled({
-            environmentId,
-            input: { instanceId, pluginId: action.pluginId, enabled: action.enabled },
-          });
-      }
-    },
-    [
-      addMarketplace,
-      environmentId,
-      instanceId,
-      installPlugin,
-      removeMarketplace,
-      setPluginEnabled,
-      uninstallPlugin,
-      updateMarketplace,
-    ],
-  );
+  const dispatch = (
+    action: PluginAction,
+  ): Promise<AtomCommandResult<ProviderPluginsSnapshot, unknown>> => {
+    switch (action.kind) {
+      case "add-marketplace":
+        return addMarketplace({ environmentId, input: { instanceId, source: action.source } });
+      case "update-marketplace":
+        return updateMarketplace({
+          environmentId,
+          input: { instanceId, marketplace: action.marketplace },
+        });
+      case "remove-marketplace":
+        return removeMarketplace({
+          environmentId,
+          input: { instanceId, marketplace: action.marketplace },
+        });
+      case "install-plugin":
+        return installPlugin({ environmentId, input: { instanceId, pluginId: action.pluginId } });
+      case "uninstall-plugin":
+        return uninstallPlugin({
+          environmentId,
+          input: { instanceId, pluginId: action.pluginId },
+        });
+      case "set-plugin-enabled":
+        return setPluginEnabled({
+          environmentId,
+          input: { instanceId, pluginId: action.pluginId, enabled: action.enabled },
+        });
+    }
+  };
 
   /** Resolves true when the change landed, so the add form knows to clear its draft. */
-  const runAction = useCallback(
-    async (action: PluginAction): Promise<boolean> => {
-      const target = pluginActionTarget(action);
-      if (pendingRef.current.has(target)) return false;
-      pendingRef.current.add(target);
-      setPendingTargets(new Set(pendingRef.current));
-      const result = await dispatch(action);
-      pendingRef.current.delete(target);
-      setPendingTargets(new Set(pendingRef.current));
-      if (result._tag === "Success") {
-        mutationsLandedRef.current += 1;
-        applySnapshot(result.value);
-        // A change answers with a fresh snapshot, so an earlier failed load no longer applies.
-        setLoadFailure(null);
-        setErrors((current) => withoutTargets(current, new Set([target])));
-        return true;
-      }
-      if (isAtomCommandInterrupted(result)) return false;
-      const view = describePluginsFailure(action.kind, squashAtomCommandFailure(result));
-      setErrors((current) => new Map(current).set(target, { action, view }));
-      // The change may have landed even though its answer failed, or the row may be stale.
-      // Re-reading the list shows what is really installed while the failure stays visible.
-      void refreshPlugins();
-      return false;
-    },
-    [applySnapshot, dispatch, refreshPlugins],
-  );
+  const runAction = async (action: PluginAction): Promise<boolean> => {
+    const target = pluginActionTarget(action);
+    if (pendingRef.current.has(target)) return false;
+    pendingRef.current.add(target);
+    setPendingTargets(new Set(pendingRef.current));
+    const result = await dispatch(action);
+    pendingRef.current.delete(target);
+    setPendingTargets(new Set(pendingRef.current));
+    if (result._tag === "Success") {
+      mutationsLandedRef.current += 1;
+      applySnapshot(result.value);
+      // A change answers with a fresh snapshot, so an earlier failed load no longer applies.
+      setLoadFailure(null);
+      setErrors((current) => withoutTargets(current, new Set([target])));
+      return true;
+    }
+    if (isAtomCommandInterrupted(result)) return false;
+    const view = describePluginsFailure(action.kind, squashAtomCommandFailure(result));
+    setErrors((current) => new Map(current).set(target, { action, view }));
+    // The change may have landed even though its answer failed, or the row may be stale.
+    // Re-reading the list shows what is really installed while the failure stays visible.
+    void refreshPlugins();
+    return false;
+  };
 
   // Removing a marketplace or uninstalling a plugin is hard to undo, so both ask first.
-  const confirmThen = useCallback(
-    async (action: PluginAction, message: string) => {
-      const confirmed = await ensureLocalApi().dialogs.confirm(message, {
-        variant: "destructive",
-      });
-      if (confirmed) await runAction(action);
-    },
-    [runAction],
-  );
+  const confirmThen = async (action: PluginAction, message: string) => {
+    const confirmed = await ensureLocalApi().dialogs.confirm(message, {
+      variant: "destructive",
+    });
+    if (confirmed) await runAction(action);
+  };
 
-  const submitMarketplace = useCallback(
-    (source: string) => runAction({ kind: "add-marketplace", source }),
-    [runAction],
-  );
+  const submitMarketplace = (source: string) => runAction({ kind: "add-marketplace", source });
 
-  const groups = useMemo(
-    () => (snapshot === null ? [] : groupPluginsByMarketplace(snapshot)),
-    [snapshot],
-  );
+  const groups = snapshot === null ? [] : groupPluginsByMarketplace(snapshot);
   const addPending = pendingTargets.has(ADD_MARKETPLACE_TARGET);
   const addError = errors.get(ADD_MARKETPLACE_TARGET);
 

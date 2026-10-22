@@ -750,8 +750,8 @@ export const makeProviderPlugins = Effect.fn("makeProviderPlugins")(function* (
       install: (pluginId) => run(["add", pluginId]).pipe(Effect.asVoid),
       uninstall: (install) => run(["remove", install.id]).pipe(Effect.asVoid),
       // `codex plugin` has no enable verb; `[plugins."<id>"].enabled` in config.toml is the switch.
-      setEnabled: (install, enabled) =>
-        Effect.gen(function* () {
+      setEnabled: Effect.fn("ProviderPlugins.setCodexPluginEnabled")(
+        function* (install, enabled) {
           const { client } = yield* withCodexAppServerClient({
             binaryPath,
             homePath: sharedHomePath,
@@ -763,31 +763,34 @@ export const makeProviderPlugins = Effect.fn("makeProviderPlugins")(function* (
             mergeStrategy: "replace",
             value: enabled,
           });
-        }).pipe(
-          Effect.scoped,
-          Effect.provide(services),
-          Effect.mapError((cause) =>
-            fail(
-              instanceId,
-              operation,
-              "command_failed",
-              "Codex could not save the plugin setting. Check the binary path in provider settings.",
-              cause,
-            ),
-          ),
-          Effect.timeoutOrElse({
-            duration: PLUGIN_COMMAND_TIMEOUT_MS,
-            orElse: () =>
-              Effect.fail(
-                fail(
-                  instanceId,
-                  operation,
-                  "command_failed",
-                  "Codex did not save the plugin setting in time. Try again.",
-                ),
+        },
+        (effect) =>
+          effect.pipe(
+            Effect.scoped,
+            Effect.provide(services),
+            Effect.mapError((cause) =>
+              fail(
+                instanceId,
+                operation,
+                "command_failed",
+                "Codex could not save the plugin setting. Check the binary path in provider settings.",
+                cause,
               ),
-          }),
-        ),
+            ),
+            Effect.timeoutOrElse({
+              duration: PLUGIN_COMMAND_TIMEOUT_MS,
+              orElse: () =>
+                Effect.fail(
+                  fail(
+                    instanceId,
+                    operation,
+                    "command_failed",
+                    "Codex did not save the plugin setting in time. Try again.",
+                  ),
+                ),
+            }),
+          ),
+      ),
     } satisfies PluginBackend;
   });
 
