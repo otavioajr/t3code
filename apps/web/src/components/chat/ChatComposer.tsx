@@ -372,6 +372,8 @@ export interface ChatComposerHandle {
 }
 
 export interface ChatComposerProps {
+  asideAvailable?: boolean;
+  onAddAside?: (text?: string) => Promise<boolean>;
   composerDraftTarget: ScopedThreadRef | DraftId;
   environmentId: EnvironmentId;
   canOperateThread: boolean;
@@ -1237,6 +1239,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     planCommandAvailable,
     defaultCommandAvailable: planModeUiEnabled || planFirst,
     compactSlashCommandAvailable,
+    asideAvailable: props.asideAvailable === true,
     selectedProvider,
     selectedProviderSkills,
     selectedProviderSlashCommands,
@@ -1975,6 +1978,18 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       return;
     }
     if (item.type === "slash-command") {
+      if (item.command === "aside") {
+        if (!props.asideAvailable || !props.onAddAside) return;
+        const text = snapshot.value.slice(trigger.rangeEnd).trim();
+        void props.onAddAside(text).then((opened) => {
+          if (!opened) return;
+          applyPromptReplacement(trigger.rangeStart, snapshot.value.length, "", {
+            expectedText: snapshot.value.slice(trigger.rangeStart),
+          });
+          setComposerHighlightedItemId(null);
+        });
+        return;
+      }
       if (item.command === "model") {
         const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "", {
           expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),

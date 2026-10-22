@@ -108,7 +108,7 @@ export type OrchestrationV2ProviderRef = typeof OrchestrationV2ProviderRef.Type;
 
 export const OrchestrationV2AppThreadLineage = Schema.Struct({
   parentThreadId: Schema.NullOr(ThreadId),
-  relationshipToParent: Schema.NullOr(Schema.Literals(["fork", "subagent"])),
+  relationshipToParent: Schema.NullOr(Schema.Literals(["fork", "subagent", "aside"])),
   rootThreadId: ThreadId,
 });
 export type OrchestrationV2AppThreadLineage = typeof OrchestrationV2AppThreadLineage.Type;
@@ -2940,6 +2940,7 @@ export const OrchestrationV2Command = Schema.Union([
   }),
   Schema.Struct({
     type: Schema.Literal("thread.fork"),
+    presentation: Schema.optional(Schema.Literal("aside")),
     ...OrchestrationV2CreationFields,
     commandId: CommandId,
     sourceThreadId: ThreadId,

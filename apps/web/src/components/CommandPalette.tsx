@@ -1,3 +1,4 @@
+import { requestNewAside } from "../commandPaletteBus";
 import { threadPullRequestLinkMode } from "@t3tools/client-runtime/thread-pull-request-compatibility";
 import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
 
@@ -112,7 +113,13 @@ import {
   useEnvironments,
   usePrimaryEnvironmentId,
 } from "../state/environments";
-import { useProjects, useServerConfigs, useThreadShells, waitForProject } from "../state/entities";
+import {
+  useProjects,
+  useServerConfigs,
+  useThreadShells,
+  useQuietThreadProjection,
+  waitForProject,
+} from "../state/entities";
 import { resolveThreadActionProjectRef, startNewThreadFromContext } from "../lib/chatThreadActions";
 import {
   appendBrowsePathSegment,
@@ -724,6 +731,13 @@ function OpenCommandPaletteDialog(props: {
 
   const { projectCwdById, projectByKey, projectTitleById } = useProjectLookups();
 
+  const asideSource = useQuietThreadProjection(
+    activeThread ? scopeThreadRef(activeThread.environmentId, activeThread.id) : null,
+  );
+  const asideAvailable =
+    asideSource?.projection.runs.some(
+      (run) => run.status === "completed" && run.checkpointId !== null,
+    ) === true;
   const activeThreadId = activeThread?.id;
   const supportsThreadFind =
     environments.find((environment) => environment.environmentId === activeThread?.environmentId)
@@ -1184,6 +1198,23 @@ function OpenCommandPaletteDialog(props: {
   };
 
   const actionItems: Array<CommandPaletteActionItem | CommandPaletteSubmenuItem> = [];
+  if (activeThreadId)
+    actionItems.push({
+      kind: "action",
+      value: "action:new-aside",
+      title: "New aside",
+      disabled: !asideAvailable,
+      description: asideAvailable
+        ? "Continue in a parallel conversation"
+        : "Complete a run with a checkpoint before opening an aside.",
+      searchTerms: ["aside", "parallel chat"],
+      icon: <SquarePenIcon className={ITEM_ICON_CLASS} />,
+      shortcutCommand: "aside.new",
+      run: async () => {
+        requestNewAside();
+        setOpen(false);
+      },
+    });
 
   if (projects.length > 0) {
     const activeProjectTitle =

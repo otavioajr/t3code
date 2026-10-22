@@ -45,6 +45,7 @@ export interface ChatShortcutsInput {
  */
 export function useChatShortcuts(input: ChatShortcutsInput) {
   const handleShortcut = useEffectEvent((event: KeyboardEvent) => {
+    if (event.target instanceof Element && event.target.closest("[data-embedded-chat]")) return;
     const { keybindings } = input;
     if (preventRepeatedTerminalCloseShortcut(event, keybindings)) {
       event.stopPropagation();

@@ -1,3 +1,11 @@
+import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
+import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { newThreadId, newMessageId } from "../../lib/utils";
+import { threadEnvironment } from "../../state/threads";
+import { waitForThreadShell } from "../../state/entities";
+import { useOrchestrationCommand } from "../../state/use-orchestration-command";
+import { useComposerDraftStore } from "../../composerDraftStore";
+import { onNewAside } from "../../commandPaletteBus";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import type { Dispatch } from "react";
 import type { ThreadPreviewState } from "../../previewStateStore";
@@ -32,6 +40,9 @@ import { previewEnvironment } from "../../state/preview";
 import { useAtomCommand } from "../../state/use-atom-command";
 import type { ChatShortcutCommands } from "./useChatShortcuts";
 interface RightPanelActionsInput {
+  readonly activeThread: EnvironmentThreadShell | undefined;
+  readonly asideAvailable: boolean;
+  readonly embedded: boolean;
   readonly activeThreadRef: ScopedThreadRef | null;
   readonly activeProject: EnvironmentProject | null;
   readonly activeRightPanelSurface: RightPanelSurface | null;
@@ -90,6 +101,66 @@ export function useRightPanelActions(input: RightPanelActionsInput) {
     onDiffPanelOpen,
   } = input;
 
+  const forkAside = useOrchestrationCommand(threadEnvironment.forkFromRun, { reportFailure: true });
+  const startAsideTurn = useOrchestrationCommand(threadEnvironment.startTurn, {
+    reportFailure: true,
+  });
+  const addAsideSurface = async (text = "") => {
+    if (!activeThreadRef || !input.activeThread || input.embedded) return false;
+    if (!input.asideAvailable) {
+      toastManager.add({
+        type: "info",
+        title: "Aside unavailable",
+        description: "Complete a run with a checkpoint before opening an aside.",
+      });
+      return false;
+    }
+    const targetThreadId = newThreadId();
+    const targetRef = scopeThreadRef(activeThreadRef.environmentId, targetThreadId);
+    const result = await forkAside({
+      environmentId: activeThreadRef.environmentId,
+      input: {
+        sourceThreadId: activeThreadRef.threadId,
+        targetThreadId,
+        sourcePoint: { type: "latest_stable" },
+        presentation: "aside",
+      },
+    });
+    if (result._tag === "Failure") return false;
+    if (!(await waitForThreadShell(targetRef))) {
+      useRightPanelStore.getState().openAside(activeThreadRef, targetThreadId);
+      toastManager.add({
+        type: "error",
+        title: "Aside created, but its data has not reached this client. Reconnect to recover it.",
+      });
+      return false;
+    }
+    useRightPanelStore.getState().openAside(activeThreadRef, targetThreadId);
+    if (text.trim()) {
+      const sent = await startAsideTurn({
+        environmentId: targetRef.environmentId,
+        input: {
+          threadId: targetThreadId,
+          message: { messageId: newMessageId(), role: "user", text: text.trim(), attachments: [] },
+          modelSelection: input.activeThread.modelSelection,
+          runtimeMode: input.activeThread.runtimeMode,
+          interactionMode: input.activeThread.interactionMode,
+        },
+      });
+      if (sent._tag === "Failure")
+        useComposerDraftStore.getState().setPrompt(targetRef, text.trim());
+      return true;
+    }
+    return true;
+  };
+  const addAsideSurfaceStable = useStableCallback(addAsideSurface);
+  useEffect(
+    () =>
+      onNewAside(() => {
+        if (!input.embedded) void addAsideSurfaceStable();
+      }),
+    [input.embedded, addAsideSurfaceStable],
+  );
   const openPreview = useAtomCommand(previewEnvironment.open, { reportFailure: false });
   const onToggleDiff = () => {
     if (!isServerThread) {
@@ -303,11 +374,15 @@ export function useRightPanelActions(input: RightPanelActionsInput) {
       if (!activeRightPanelSurface) return false;
       if (!event.repeat) closeRightPanelSurface(activeRightPanelSurface);
     },
+    "aside.new": () => {
+      void addAsideSurfaceStable();
+    },
     "diff.toggle": () => onToggleDiff(),
   } satisfies ChatShortcutCommands;
 
   return {
     shortcuts,
+    addAsideSurfaceStable,
     activateRightPanelSurfaceStable,
     addDeviceSurfaceStable,
     addDiffSurfaceStable,

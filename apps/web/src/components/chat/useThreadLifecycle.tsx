@@ -65,6 +65,7 @@ type PendingThreadRequests = ReturnType<typeof usePendingThreadRequests>;
 type LocalDispatchState = ReturnType<typeof useLocalDispatchState>;
 
 interface ThreadLifecycleInput {
+  readonly onEmbeddedThreadOpen?: ((threadId: ThreadId) => void) | undefined;
   readonly environmentId: EnvironmentId;
   readonly routeThreadKey: string;
   readonly currentRouteThreadKeyRef: { readonly current: string | null };
@@ -414,6 +415,10 @@ export function useThreadLifecycle(input: ThreadLifecycleInput) {
   const handleStopBackgroundWorkStable = useStableCallback(handleStopBackgroundWork);
   const openRelatedThreadGenerationRef = useRef(0);
   const onOpenRelatedThread = async (threadId: ThreadId) => {
+    if (input.onEmbeddedThreadOpen) {
+      input.onEmbeddedThreadOpen(threadId);
+      return;
+    }
     const generation = ++openRelatedThreadGenerationRef.current;
     const threadRef = scopeThreadRef(environmentId, threadId);
     const isEnvironmentLive = () =>

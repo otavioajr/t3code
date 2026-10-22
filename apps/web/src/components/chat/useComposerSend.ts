@@ -157,6 +157,7 @@ type UsageLimitsPanel = ReturnType<typeof useUsageLimitsPanel>;
 type TimelineFollow = ReturnType<typeof useTimelineFollow>;
 
 interface ComposerSendInput {
+  readonly onAside: (text?: string) => Promise<boolean>;
   readonly environmentId: EnvironmentId;
   readonly routeThreadKey: string;
   readonly currentRouteThreadKeyRef: { readonly current: string | null };
@@ -401,6 +402,27 @@ export function useComposerSend(input: ComposerSendInput) {
       isUsageLimitsCommand(promptRef.current)
     ) {
       if (openUsageLimits()) {
+        promptRef.current = "";
+        setComposerDraftPrompt(composerDraftTarget, "");
+        composerRef.current?.resetCursorState();
+      }
+      return;
+    }
+
+    const asidePrompt = promptRef.current;
+    if (!directAnnotation && /^\/aside(?:\s|$)/i.test(asidePrompt.trim())) {
+      if (draftHasNonPromptContent(composerDraftTarget)) {
+        toastManager.add({
+          type: "warning",
+          title: "Send /aside with text only",
+          description: "Remove attachments and context chips before opening an aside.",
+        });
+        return;
+      }
+      if (
+        (await input.onAside(asidePrompt.trim().replace(/^\/aside\s*/i, ""))) &&
+        promptRef.current === asidePrompt
+      ) {
         promptRef.current = "";
         setComposerDraftPrompt(composerDraftTarget, "");
         composerRef.current?.resetCursorState();
@@ -720,7 +742,11 @@ export function useComposerSend(input: ComposerSendInput) {
       composerThreadContexts.length === 0
         ? parseStandaloneComposerSlashCommand(trimmed)
         : null;
-    if (standaloneSlashCommand && multipleModelSelections === null) {
+    if (
+      standaloneSlashCommand &&
+      standaloneSlashCommand !== "aside" &&
+      multipleModelSelections === null
+    ) {
       handleInteractionModeChange(standaloneSlashCommand);
       promptRef.current = "";
       clearComposerDraftContent(composerDraftTarget);

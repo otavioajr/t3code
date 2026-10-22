@@ -13,6 +13,7 @@ import {
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  parseStandaloneComposerSlashCommand,
   clampCollapsedComposerCursor,
   collapseExpandedComposerCursor,
   composerSubmissionIntentForKey,
@@ -572,4 +573,9 @@ describe("extendReplacementRangeForTrailingSpace", () => {
     expect(extendReplacementRangeForTrailingSpace("@fi rest", 3, "@file")).toBe(3);
     expect(extendReplacementRangeForTrailingSpace("@fi", 3, "@file ")).toBe(3);
   });
+});
+
+it("recognizes standalone aside commands without consuming the first message", () => {
+  expect(parseStandaloneComposerSlashCommand(" /ASIDE ")).toBe("aside");
+  expect(parseStandaloneComposerSlashCommand("/aside explain this")).toBeNull();
 });

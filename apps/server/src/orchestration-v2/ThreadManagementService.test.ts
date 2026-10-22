@@ -337,3 +337,40 @@ it.effect.each([
     expect(dispatched).toEqual(settles ? ["thread.settle"] : []);
   }),
 );
+
+it.effect("hides aside and subagent threads unless explicitly included", () => {
+  const at = DateTime.makeUnsafe("2026-10-22T12:00:00Z");
+  const threads = ([null, "fork", "subagent", "aside"] as const).map(
+    (relationshipToParent, index) => ({
+      id: ThreadId.make(`thread:${index}`),
+      updatedAt: at,
+      lineage: { relationshipToParent },
+    }),
+  );
+  const testLayer = ThreadManagementService.layer.pipe(
+    Layer.provide(Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({})),
+    Layer.provide(
+      Layer.mock(Orchestrator.OrchestratorV2)({
+        getShellSnapshot: () =>
+          Effect.succeed({
+            threads,
+          } as unknown as import("@t3tools/contracts").OrchestrationV2ShellSnapshot),
+      }),
+    ),
+    Layer.provide(ServerSettings.layerTest({})),
+    Layer.provideMerge(layerReceiptsTest),
+  );
+  return Effect.gen(function* () {
+    const service = yield* ThreadManagementService.ThreadManagementService;
+    const visible = yield* service.listProjectThreads({
+      projectId: ProjectId.make("project"),
+      includeSubagents: false,
+    });
+    expect(visible.map((thread) => thread.id)).toEqual(["thread:1", "thread:0"]);
+    const all = yield* service.listProjectThreads({
+      projectId: ProjectId.make("project"),
+      includeSubagents: true,
+    });
+    expect(all).toHaveLength(4);
+  }).pipe(Effect.provide(testLayer));
+});

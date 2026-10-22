@@ -53,6 +53,7 @@ export function useComposerMenuItems({
   pullRequestProjectId,
   pullRequestRepository,
   threadPullRequests,
+  asideAvailable,
   planCommandAvailable,
   defaultCommandAvailable,
   compactSlashCommandAvailable,
@@ -61,6 +62,7 @@ export function useComposerMenuItems({
   selectedProviderSlashCommands,
   showSkillsInSlashMenu,
 }: {
+  readonly asideAvailable: boolean;
   readonly composerTrigger: ComposerTrigger | null;
   readonly environmentId: EnvironmentId;
   readonly gitCwd: string | null;
@@ -180,6 +182,16 @@ export function useComposerMenuItems({
     }
     if (composerTrigger.kind === "slash-command") {
       const builtInSlashCommandItems = [
+        {
+          id: "slash:aside",
+          type: "slash-command",
+          command: "aside",
+          label: "/aside",
+          disabled: !asideAvailable,
+          description: asideAvailable
+            ? "Open a parallel conversation from the last completed run"
+            : "Complete a run with a checkpoint before opening an aside.",
+        },
         {
           id: "slash:model",
           type: "slash-command",

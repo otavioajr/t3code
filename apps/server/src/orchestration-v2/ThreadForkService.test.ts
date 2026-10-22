@@ -110,6 +110,7 @@ function makeSourceProjection(sourceRun: OrchestrationV2Run): OrchestrationV2Thr
 const planFork = (
   sourceRun: OrchestrationV2Run,
   sourceProjection = makeSourceProjection(sourceRun),
+  presentation?: "aside",
 ) =>
   Effect.gen(function* () {
     const service = yield* ThreadForkService.ThreadForkServiceV2;
@@ -123,7 +124,7 @@ const planFork = (
       },
       transferId: ContextTransferId.make("context-transfer:fork-snoozed-source"),
       targetThreadId,
-      title: "Awake fork",
+      ...(presentation ? { presentation } : { title: "Awake fork" }),
       createdBy: "user",
       creationSource: "mobile",
       createdAt: forkCreatedAt,
@@ -240,5 +241,19 @@ it.effect("rejects in-progress and rolled-back fork sources", () =>
       assert.equal(error.targetThreadId, targetThreadId);
       assert.equal(error.cause, ThreadForkService.forkableSourceRunStatusError(sourceRun));
     }
+  }),
+);
+
+it.effect("creates an aside with inherited model and fork context", () =>
+  Effect.gen(function* () {
+    const result = yield* planFork(makeSourceRun("completed"), undefined, "aside");
+    assert.equal(result.targetThread.lineage.relationshipToParent, "aside");
+    assert.equal(result.targetThread.title, "Snoozed source aside");
+    assert.deepEqual(result.targetThread.modelSelection, modelSelection);
+    assert.deepEqual(result.targetThread.forkedFrom, {
+      type: "run",
+      threadId: sourceThreadId,
+      runId: sourceRunId,
+    });
   }),
 );

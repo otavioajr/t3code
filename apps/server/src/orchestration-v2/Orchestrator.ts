@@ -3906,6 +3906,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         canonicalSourcePoint: contextSourcePointForRun(sourceProjection, sourceRun),
         transferId,
         targetThreadId: command.targetThreadId,
+        ...(command.presentation === undefined ? {} : { presentation: command.presentation }),
         ...(command.title === undefined ? {} : { title: command.title }),
         createdBy: command.createdBy,
         creationSource: command.creationSource,
@@ -3975,7 +3976,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       );
 
     if (
-      sourceProjection.thread.lineage.relationshipToParent !== "fork" ||
+      !["fork", "aside"].includes(sourceProjection.thread.lineage.relationshipToParent ?? "") ||
       sourceProjection.thread.lineage.parentThreadId !== command.targetThreadId
     ) {
       return yield* new OrchestratorDispatchError({

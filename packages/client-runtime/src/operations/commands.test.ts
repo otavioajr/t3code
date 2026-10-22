@@ -37,6 +37,7 @@ import type { WsRpcProtocolClient } from "../rpc/protocol.ts";
 import { v2Now, v2Projection, v2ThreadId } from "../state/orchestrationV2TestFixtures.ts";
 import {
   archiveThread,
+  forkThreadFromRun,
   interruptThreadTurn,
   revertThreadCheckpoint,
   resumeThreadQueue,
@@ -137,6 +138,22 @@ const makeSupervisor = Effect.fn("TestEnvironmentCommands.makeSupervisor")(funct
 });
 
 describe("V2 environment commands", () => {
+  it.effect("dispatches aside presentation with a latest-stable fork source", () =>
+    Effect.gen(function* () {
+      const commands: OrchestrationV2Command[] = [];
+      const supervisor = yield* makeSupervisor({ commands, projects: [] });
+      yield* forkThreadFromRun({
+        commandId: CommandId.make("aside"),
+        sourceThreadId: v2ThreadId,
+        targetThreadId: ThreadId.make("aside-thread"),
+        sourcePoint: { type: "latest_stable" },
+        presentation: "aside",
+      }).pipe(Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor));
+      expect(commands).toMatchObject([
+        { type: "thread.fork", sourcePoint: { type: "latest_stable" }, presentation: "aside" },
+      ]);
+    }).pipe(Effect.provide(layerTestCrypto)),
+  );
   it.effect("distinguishes sending a selected queued message from resuming queue order", () =>
     Effect.gen(function* () {
       const commands: OrchestrationV2Command[] = [];

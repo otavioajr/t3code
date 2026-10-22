@@ -17,7 +17,7 @@ export type ClosedView =
   | {
       kind: "panel-tab";
       threadRef: ScopedThreadRef;
-      surface: Exclude<RightPanelSurface, { kind: "terminal" }>;
+      surface: Exclude<RightPanelSurface, { kind: "aside" }>;
     }
   | { kind: "browser"; threadRef: ScopedThreadRef; snapshot: PreviewSessionSnapshot };
 
@@ -82,6 +82,15 @@ const isClosedViewEntry = (entry: unknown): entry is ClosedViewEntry => {
             typeof surface.target.deviceId === "string" &&
             typeof surface.target.name === "string" &&
             (surface.target.platform === "ios" || surface.target.platform === "android")))
+      );
+    case "terminal":
+      return (
+        typeof surface.resourceId === "string" &&
+        surface.id === `terminal:${surface.resourceId}` &&
+        Array.isArray(surface.terminalIds) &&
+        surface.terminalIds.every((id) => typeof id === "string") &&
+        typeof surface.activeTerminalId === "string" &&
+        (surface.title === undefined || typeof surface.title === "string")
       );
     case "plan":
       return typeof surface.planId === "string" && surface.id === `plan:${surface.planId}`;

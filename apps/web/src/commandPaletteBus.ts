@@ -34,3 +34,12 @@ export function isCommandPaletteOpen(): boolean {
     typeof document !== "undefined" && document.querySelector("[data-command-palette]") !== null
   );
 }
+
+export function requestNewAside(): void {
+  window.dispatchEvent(new Event("t3code:new-aside"));
+}
+
+export function onNewAside(listener: () => void): () => void {
+  window.addEventListener("t3code:new-aside", listener);
+  return () => window.removeEventListener("t3code:new-aside", listener);
+}

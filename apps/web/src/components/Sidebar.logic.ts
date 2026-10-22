@@ -513,7 +513,10 @@ export function buildMultiSelectThreadContextMenuItems(input: {
 }
 
 function isSidebarSubagentThread(thread: Pick<SidebarThreadSummary, "lineage">): boolean {
-  return thread.lineage.relationshipToParent === "subagent";
+  return (
+    thread.lineage.relationshipToParent === "subagent" ||
+    thread.lineage.relationshipToParent === "aside"
+  );
 }
 
 // Subagent threads have no sidebar row, so an open subagent is represented by

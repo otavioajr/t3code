@@ -1110,7 +1110,12 @@ it("excludes subagents from navigation, search and ordering while retaining user
     title: "Fork",
     lineage: { parentThreadId: root.id, rootThreadId: root.id, relationshipToParent: "fork" },
   });
-  const threads = [root, child, fork];
+  const aside = makeThread({
+    ...child,
+    id: ThreadId.make("aside"),
+    lineage: { ...child.lineage, relationshipToParent: "aside" },
+  });
+  const threads = [root, child, fork, aside];
   expect(
     buildThreadListV2Items({ threads, environmentId: null, searchQuery: "", now: NOW }).items.map(
       (item) => item.thread.id,

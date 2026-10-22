@@ -39,6 +39,50 @@ async function reloadRightPanelStore() {
 }
 
 describe("rightPanelStore", () => {
+  it("persists aside tabs and custom terminal names through v15 migration", async () => {
+    const store = useRightPanelStore.getState();
+    store.openAside(refA, ThreadId.make("aside-1"));
+    store.openTerminal(refA, "terminal-1");
+    store.renameSurface(refA, "terminal:terminal-1", " Build ");
+    await reloadRightPanelStore();
+    expect(
+      selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA).surfaces,
+    ).toMatchObject([
+      { kind: "aside", resourceId: "aside-1" },
+      { kind: "terminal", title: "Build" },
+    ]);
+    const migrated = migratePersistedRightPanelState({
+      byThreadKey: useRightPanelStore.getState().byThreadKey,
+    });
+    expect(migrated.byThreadKey).toEqual(useRightPanelStore.getState().byThreadKey);
+    expect(useRightPanelStore.persist.getOptions().version).toBe(15);
+    store.renameSurface(refA, "terminal:terminal-1", " ");
+    const terminal = selectActiveRightPanelSurface(useRightPanelStore.getState().byThreadKey, refA);
+    expect(terminal).not.toHaveProperty("title");
+    store.open(refA, "device");
+    store.renameSurface(refA, "device", " ");
+    expect(
+      selectActiveRightPanelSurface(useRightPanelStore.getState().byThreadKey, refA),
+    ).toMatchObject({ title: "Device" });
+  });
+  it("reopens a terminal tab with its name", async () => {
+    const store = useRightPanelStore.getState();
+    store.openTerminal(refA, "terminal-1");
+    store.renameSurface(refA, "terminal:terminal-1", "Build");
+    store.closeSurface(refA, "terminal:terminal-1");
+    const view = useClosedViewStore.getState().entries[0]!;
+    expect(
+      await reopenClosedView(view, {
+        workspaceAvailable: true,
+        openPreview: async () => {
+          throw new Error("unexpected preview");
+        },
+      }),
+    ).toBe(true);
+    expect(
+      selectActiveRightPanelSurface(useRightPanelStore.getState().byThreadKey, refA),
+    ).toMatchObject({ title: "Build" });
+  });
   it("records single and bulk tab closes, newest first", () => {
     const store = useRightPanelStore.getState();
     const pr = pullRequestSurface({
@@ -117,7 +161,7 @@ describe("rightPanelStore", () => {
     ).toEqual([expect.objectContaining({ id: "file:src/app.ts" })]);
   });
 
-  it("records only closed tabs when a panel is hidden or a terminal tab closes", () => {
+  it("records closed tabs and terminals without recording panel hiding", () => {
     const store = useRightPanelStore.getState();
     store.open(refA, "diff");
     store.openFile(refA, "src/app.ts");
@@ -131,9 +175,10 @@ describe("rightPanelStore", () => {
     store.openTerminal(refA, "term-1");
     store.closeSurface(refA, "terminal:term-1");
     expect(useClosedViewStore.getState().entries).toMatchObject([
+      { kind: "panel-tab", threadRef: refA, surface: { id: "terminal:term-1" } },
       { kind: "panel-tab", threadRef: refA, surface: { id: "file:src/app.ts" } },
     ]);
-    expect(useClosedViewStore.getState().entries).toHaveLength(1);
+    expect(useClosedViewStore.getState().entries).toHaveLength(2);
   });
 
   it("gives each host/device its own tab and preserves renamed tabs", () => {
@@ -157,7 +202,7 @@ describe("rightPanelStore", () => {
       "device:nucbox:emulator-5580",
       "device:macmini:ios-1",
     ]);
-    store.renameDevice(refA, "device:nucbox:emulator-5580", "Android test");
+    store.renameSurface(refA, "device:nucbox:emulator-5580", "Android test");
     store.openDevice(refA, android);
     state = selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA);
     expect(state.surfaces).toHaveLength(2);

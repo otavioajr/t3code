@@ -28,6 +28,7 @@ const RIGHT_PANEL_KINDS = [
   "pull-request",
   "pull-requests",
   "plan",
+  "aside",
 ] as const;
 export type RightPanelKind = (typeof RIGHT_PANEL_KINDS)[number];
 
@@ -41,12 +42,14 @@ export interface DeviceTabTarget {
 }
 
 export type RightPanelSurface =
+  | { id: `aside:${string}`; kind: "aside"; resourceId: string }
   | { id: `browser:${string}`; kind: "preview"; resourceId: string }
   | { id: "browser:new"; kind: "preview"; resourceId: null }
   | { id: "device" | `device:${string}`; kind: "device"; target?: DeviceTabTarget; title?: string }
   | {
       id: `terminal:${string}`;
       kind: "terminal";
+      title?: string;
       resourceId: string;
       terminalIds: string[];
       activeTerminalId: string;
@@ -92,7 +95,7 @@ export type RightPanelSurface =
   | { id: `plan:${string}`; kind: "plan"; planId: PlanId };
 
 const RIGHT_PANEL_STORAGE_KEY = "t3code:right-panel-state:v2";
-const RIGHT_PANEL_STORAGE_VERSION = 14;
+const RIGHT_PANEL_STORAGE_VERSION = 15;
 
 export const PULL_REQUESTS_PANEL_REF = scopeThreadRef(
   EnvironmentId.make("pull-requests-panel"),
@@ -138,10 +141,11 @@ interface RightPanelStoreState {
   ) => boolean;
   open: (
     ref: ScopedThreadRef,
-    kind: Exclude<RightPanelKind, "file" | "terminal" | "pull-request" | "plan">,
+    kind: Exclude<RightPanelKind, "file" | "terminal" | "pull-request" | "plan" | "aside">,
   ) => void;
+  openAside: (ref: ScopedThreadRef, threadId: ThreadId) => void;
   openDevice: (ref: ScopedThreadRef, target: DeviceTabTarget, automatic?: boolean) => void;
-  renameDevice: (ref: ScopedThreadRef, surfaceId: string, title: string) => void;
+  renameSurface: (ref: ScopedThreadRef, surfaceId: string, title: string) => void;
   openBrowser: (ref: ScopedThreadRef, tabId: string | null) => void;
   openFile: (ref: ScopedThreadRef, relativePath: string, line?: number) => void;
   /**
@@ -203,7 +207,7 @@ interface RightPanelStoreState {
   toggleVisibility: (ref: ScopedThreadRef) => void;
   toggle: (
     ref: ScopedThreadRef,
-    kind: Exclude<RightPanelKind, "file" | "terminal" | "pull-request" | "plan">,
+    kind: Exclude<RightPanelKind, "file" | "terminal" | "pull-request" | "plan" | "aside">,
   ) => void;
   setThreadPanelOpen: (
     ref: ScopedThreadRef,
@@ -226,7 +230,10 @@ const DEFAULT_THREAD_PANEL_VISIBILITY: ThreadPanelVisibility = {
 };
 
 const singletonSurface = (
-  kind: Exclude<RightPanelKind, "file" | "preview" | "terminal" | "pull-request" | "plan">,
+  kind: Exclude<
+    RightPanelKind,
+    "file" | "preview" | "terminal" | "pull-request" | "plan" | "aside"
+  >,
 ): RightPanelSurface => {
   switch (kind) {
     case "diff":
@@ -482,6 +489,12 @@ export function migratePersistedRightPanelState(persistedState: unknown): {
                     const kind = (surface as { kind?: string }).kind;
                     if (kind === "agents") return [];
                     // The pre-v9 plan surface had a different shape, so only `plan:<planId>` survives.
+                    if (surface.kind === "aside") {
+                      return typeof surface.resourceId === "string" &&
+                        surface.id === `aside:${surface.resourceId}`
+                        ? [surface]
+                        : [];
+                    }
                     if (surface.kind === "plan") {
                       return typeof surface.planId === "string" &&
                         surface.id === `plan:${surface.planId}`
@@ -708,16 +721,32 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
             );
           }),
         ),
-      renameDevice: (ref, surfaceId, title) =>
+      renameSurface: (ref, surfaceId, title) =>
         set((state) =>
           userAction(state, scopedThreadKey(ref), (current) => ({
             ...current,
-            surfaces: current.surfaces.map((surface) =>
-              surface.id === surfaceId && surface.kind === "device"
-                ? { ...surface, title: title.trim() || surface.target?.name || "Device" }
-                : surface,
-            ),
+            surfaces: current.surfaces.map((surface) => {
+              if (
+                surface.id !== surfaceId ||
+                (surface.kind !== "device" && surface.kind !== "terminal")
+              )
+                return surface;
+              if (surface.kind === "device")
+                return { ...surface, title: title.trim() || surface.target?.name || "Device" };
+              const { title: _title, ...rest } = surface;
+              return title.trim() ? { ...rest, title: title.trim() } : rest;
+            }),
           })),
+        ),
+      openAside: (ref, threadId) =>
+        set((state) =>
+          userAction(state, scopedThreadKey(ref), (current) =>
+            upsertSurface(current, {
+              id: `aside:${threadId}`,
+              kind: "aside",
+              resourceId: threadId,
+            }),
+          ),
         ),
       openBrowser: (ref, tabId) =>
         set((state) =>
@@ -1180,10 +1209,7 @@ useRightPanelStore.subscribe((next, previous) => {
       ...removed.filter((surface) => surface.id === before.activeSurfaceId),
     ];
     for (const surface of closedInOrder) {
-      if (
-        surface.kind === "terminal" ||
-        (surface.kind === "preview" && surface.resourceId !== null)
-      )
+      if (surface.kind === "aside" || (surface.kind === "preview" && surface.resourceId !== null))
         continue;
       useClosedViewStore.getState().remember({ kind: "panel-tab", threadRef, surface });
     }

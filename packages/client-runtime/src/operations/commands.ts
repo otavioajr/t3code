@@ -13,6 +13,7 @@ import {
   type NodeId,
   type OrchestrationV2Command,
   type OrchestrationV2CreationSource,
+  type OrchestrationV2ThreadForkSourcePoint,
   type PlanId,
   type ProjectId,
   type ProjectIconOverride,
@@ -206,12 +207,18 @@ export interface RevertThreadCheckpointInput extends ThreadCommandInput {
 
 export type StopThreadSessionInput = ThreadCommandInput;
 
-export interface ForkThreadFromRunInput extends CommandMetadata {
+export type ForkThreadFromRunInput = CommandMetadata & {
   readonly sourceThreadId: ThreadId;
   readonly targetThreadId: ThreadId;
-  readonly runId: RunId;
+  readonly presentation?: "aside";
   readonly title?: string;
-}
+} & (
+    | {
+        readonly sourcePoint: OrchestrationV2ThreadForkSourcePoint;
+        readonly runId?: never;
+      }
+    | { readonly runId: RunId; readonly sourcePoint?: never }
+  );
 
 export interface MergeThreadBackInput extends CommandMetadata {
   readonly sourceThreadId: ThreadId;
@@ -978,7 +985,8 @@ export const forkThreadFromRun = Effect.fn("EnvironmentCommands.forkThreadFromRu
     creationSource: input.creationSource ?? "web",
     sourceThreadId: input.sourceThreadId,
     targetThreadId: input.targetThreadId,
-    sourcePoint: { type: "run", runId: input.runId },
+    sourcePoint: input.sourcePoint ?? { type: "run", runId: input.runId },
+    ...(input.presentation === undefined ? {} : { presentation: input.presentation }),
     ...(input.title === undefined ? {} : { title: input.title }),
   });
 });

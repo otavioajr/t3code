@@ -117,6 +117,15 @@ export async function reopenClosedView(
   )
     return false;
   switch (surface.kind) {
+    case "terminal":
+      panels.openTerminal(ref, surface.resourceId);
+      for (const terminalId of surface.terminalIds) {
+        if (terminalId !== surface.resourceId)
+          panels.splitTerminal(ref, surface.id, terminalId, surface.splitDirection);
+      }
+      panels.activateTerminal(ref, surface.id, surface.activeTerminalId);
+      if (surface.title) panels.renameSurface(ref, surface.id, surface.title);
+      break;
     case "preview":
       if (surface.resourceId !== null) return false;
       panels.openBrowser(ref, null);
@@ -128,7 +137,7 @@ export async function reopenClosedView(
     case "device":
       if (surface.target) {
         panels.openDevice(ref, surface.target);
-        if (surface.title) panels.renameDevice(ref, surface.id, surface.title);
+        if (surface.title) panels.renameSurface(ref, surface.id, surface.title);
       } else panels.open(ref, "device");
       break;
     case "pull-request":

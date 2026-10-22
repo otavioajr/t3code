@@ -34,6 +34,7 @@ import { useAtomQueryRunner } from "../../state/use-atom-query-runner";
 import { rewindToMessage } from "./chatViewSend";
 import { makeThreadErrorSetter } from "../ChatView.logic";
 interface TimelineRewindInput {
+  readonly onForkReady?: ((threadId: ThreadId) => void) | undefined;
   readonly environmentId: EnvironmentId;
   readonly routeThreadRef: ScopedThreadRef;
   readonly routeThreadKey: string;
@@ -226,6 +227,7 @@ export function useTimelineRewind(input: TimelineRewindInput) {
     });
   };
 
+  const onForkReady = input.onForkReady;
   const onForkFromRun = async (input: {
     readonly sourceThreadId: ThreadId;
     readonly runId: RunId;
@@ -258,6 +260,10 @@ export function useTimelineRewind(input: TimelineRewindInput) {
         activeThread.id,
         "The fork was created, but its thread data did not reach this client. Reconnect and try opening it from the sidebar.",
       );
+      return;
+    }
+    if (onForkReady) {
+      onForkReady(targetThreadId);
       return;
     }
     await navigate({

@@ -27,6 +27,7 @@ import { horizontalListSortingStrategy, SortableContext, useSortable } from "@dn
 import { CSS } from "@dnd-kit/utilities";
 import {
   Smartphone,
+  MessagesSquare,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -120,7 +121,7 @@ export interface RightPanelTabsProps {
   /** Plan titles by plan id for `plan` tabs; a tab without an entry reads "Plan". */
   planTitlesById?: ReadonlyMap<string, string>;
   onActivate: (surface: RightPanelSurface) => void;
-  onRenameDevice?: (surfaceId: string, title: string) => void;
+  onRenameSurface?: (surfaceId: string, title: string) => void;
   onCloseSurface: (surface: RightPanelSurface) => void;
   onCloseOtherSurfaces: (surface: RightPanelSurface) => void;
   onCloseSurfacesToRight: (surface: RightPanelSurface) => void;
@@ -140,6 +141,8 @@ export interface RightPanelTabsProps {
   onAddPullRequest: () => void;
   onAddPullRequests: () => void;
   onAddDevice: () => void;
+  onAddAside?: (() => void) | undefined;
+  asideAvailable?: boolean | undefined;
   browserAvailable: boolean;
   terminalAvailable: boolean;
   diffAvailable: boolean;
@@ -173,6 +176,7 @@ const SURFACE_DISABLED_REASONS = {
   pullRequest: "This thread's branch has no pull request yet.",
   pullRequests: "No linked pull requests are available for this thread.",
   device: "Devices are only available from a thread.",
+  aside: "Complete a run with a checkpoint before opening an aside.",
 } as const;
 
 // Closed keepMounted popups must stop blocking shortcuts once their exit transition ends.
@@ -197,6 +201,7 @@ const SURFACE_UNAVAILABLE_HINTS = {
   pullRequest: "No pull request on this branch yet.",
   pullRequests: "No linked pull requests available.",
   device: "Available from a thread.",
+  aside: "Complete a run with a checkpoint before opening an aside.",
 } as const;
 
 type TabContextMenuAction =
@@ -318,6 +323,8 @@ function RightPanelEmptyState(props: {
   onAddPullRequest: () => void;
   onAddPullRequests: () => void;
   onAddDevice: () => void;
+  onAddAside?: (() => void) | undefined;
+  asideAvailable?: boolean | undefined;
   browserAvailable: boolean;
   terminalAvailable: boolean;
   diffAvailable: boolean;
@@ -336,6 +343,14 @@ function RightPanelEmptyState(props: {
       available: props.browserAvailable,
       disabledReason: SURFACE_UNAVAILABLE_HINTS.browser,
       onClick: props.onAddBrowser,
+    },
+    {
+      label: "Aside",
+      icon: MessagesSquare,
+      shortcut: "A",
+      available: props.asideAvailable === true,
+      disabledReason: SURFACE_DISABLED_REASONS.aside,
+      onClick: () => props.onAddAside?.(),
     },
     {
       label: "Terminal",
@@ -552,6 +567,8 @@ function surfaceTitle(
   planTitlesById: ReadonlyMap<string, string> | undefined,
 ): string {
   switch (surface.kind) {
+    case "aside":
+      return "Aside";
     case "diff":
       return "Diff";
     case "files":
@@ -562,6 +579,7 @@ function surfaceTitle(
       );
     case "terminal":
       return (
+        surface.title ??
         terminalLabelsById.get(surface.activeTerminalId) ??
         getTerminalLabel(surface.activeTerminalId)
       );
@@ -649,6 +667,8 @@ function SurfaceIcon({
           className="size-3"
         />
       );
+    case "aside":
+      return <MessagesSquare className="size-3 shrink-0" />;
     case "terminal":
       return <TerminalSquare className="size-3 shrink-0" />;
     case "pull-request":
@@ -894,7 +914,7 @@ function RightPanelTab(
       )}
       {props.renaming ? (
         <input
-          aria-label="Device tab name"
+          aria-label={surface.kind === "terminal" ? "Terminal tab name" : "Device tab name"}
           className="w-24 min-w-0 rounded-sm bg-background px-1 outline-none ring-1 ring-inset ring-ring"
           defaultValue={title}
           ref={(element) => {
@@ -918,7 +938,8 @@ function RightPanelTab(
               <button
                 type="button"
                 onDoubleClick={() => {
-                  if (surface.kind === "device" && props.canRename) onStartRename(surface.id);
+                  if ((surface.kind === "device" || surface.kind === "terminal") && props.canRename)
+                    onStartRename(surface.id);
                 }}
                 className="cursor-pointer flex min-w-0 items-center"
                 onClick={() => onActivate(surface)}
@@ -972,7 +993,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
   const { resolvedTheme } = useTheme();
   const tabListRef = useRef<HTMLDivElement>(null);
   const addSurfaceTriggerRef = useRef<HTMLButtonElement>(null);
-  const [renamingDevice, setRenamingDevice] = useState<string | null>(null);
+  const [renamingSurface, setRenamingSurface] = useState<string | null>(null);
   const [addSurfaceMenuOpen, setAddSurfaceMenuOpen] = useState(false);
   const [tabScrollState, setTabScrollState] = useState({
     hasOverflow: false,
@@ -1045,6 +1066,14 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
       onClick: props.onAddBrowser,
     },
     {
+      label: "Aside",
+      icon: MessagesSquare,
+      shortcut: "A",
+      available: props.asideAvailable === true,
+      disabledReason: SURFACE_DISABLED_REASONS.aside,
+      onClick: () => props.onAddAside?.(),
+    },
+    {
       label: "Terminal",
       icon: TerminalSquare,
       shortcut: "T",
@@ -1114,7 +1143,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
     if (surfaceIndex < 0) return;
 
     const items: ContextMenuItem<TabContextMenuAction>[] = [];
-    if (surface.kind === "device" && props.onRenameDevice)
+    if ((surface.kind === "device" || surface.kind === "terminal") && props.onRenameSurface)
       items.push({ id: "rename", label: "Rename" });
     if (surface.kind === "file" && surface.attachment === undefined) {
       items.push({ id: "copy-path", label: "Copy path" });
@@ -1153,7 +1182,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
     const action = await api.contextMenu.show(items, { x: event.clientX, y: event.clientY });
     switch (action) {
       case "rename":
-        setRenamingDevice(surface.id);
+        setRenamingSurface(surface.id);
         break;
       case "copy-path":
         if (surface.kind === "file" && surface.attachment === undefined) {
@@ -1202,10 +1231,10 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
       void handleTabContextMenu(event, surface);
     },
   );
-  const onStartRenameTab = useStableCallback((surfaceId: string) => setRenamingDevice(surfaceId));
+  const onStartRenameTab = useStableCallback((surfaceId: string) => setRenamingSurface(surfaceId));
   const onFinishRenameTab = useStableCallback((surfaceId: string, title: string) => {
-    props.onRenameDevice?.(surfaceId, title);
-    setRenamingDevice(null);
+    props.onRenameSurface?.(surfaceId, title);
+    setRenamingSurface(null);
   });
 
   useEffect(() => {
@@ -1294,7 +1323,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                   <RightPanelTab
                     key={surface.id}
                     surface={surface}
-                    dragDisabled={!props.onMoveSurface || renamingDevice === surface.id}
+                    dragDisabled={!props.onMoveSurface || renamingSurface === surface.id}
                     active={surface.id === props.activeSurfaceId}
                     pending={props.pendingSurfaceIds.has(surface.id)}
                     title={surfaceTitle(
@@ -1314,8 +1343,8 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                     theme={resolvedTheme}
                     environmentId={props.environmentId}
                     pullRequestStatusSeed={props.pullRequestStatusSeeds?.[surface.id]}
-                    renaming={renamingDevice === surface.id}
-                    canRename={props.onRenameDevice !== undefined}
+                    renaming={renamingSurface === surface.id}
+                    canRename={props.onRenameSurface !== undefined}
                     ownsDesktopTitleBar={ownsDesktopTitleBar}
                     onActivate={onActivateTab}
                     onClose={onCloseTab}
@@ -1469,6 +1498,8 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             onAddFiles={props.onAddFiles}
             onAddPullRequest={props.onAddPullRequest}
             onAddPullRequests={props.onAddPullRequests}
+            onAddAside={props.onAddAside}
+            asideAvailable={props.asideAvailable}
             onAddDevice={props.onAddDevice}
             browserAvailable={props.browserAvailable}
             terminalAvailable={props.terminalAvailable}

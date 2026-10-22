@@ -358,3 +358,11 @@ including filenames or folders containing `#` or `?`.
 
 On mobile, select a PDF attachment or link to open it. iOS uses the native viewer;
 Android opens a compatible installed file viewer.
+
+## Aside conversations
+
+Use `/aside` or choose **Aside** from the right panel’s **+** menu to open a parallel conversation with the context of the last completed run with a checkpoint. You can open it while the main conversation is running. The aside inherits the main conversation’s model; change it in the aside’s composer when needed. `/aside your question` sends the question as its first message.
+
+Switching tabs or hiding the panel keeps the aside running. Closing its tab archives it; restore it from **Settings → Archived**. Asides stay out of the main conversation list.
+
+Double-click a terminal tab or choose **Rename** from its context menu to name it. Clear the name to return to the automatic label. The name applies to the whole split tab and is saved on this device.

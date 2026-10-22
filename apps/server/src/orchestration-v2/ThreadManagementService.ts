@@ -738,7 +738,9 @@ const make = Effect.gen(function* () {
         snapshot.threads
           .filter(
             (thread) =>
-              input.includeSubagents || thread.lineage.relationshipToParent !== "subagent",
+              input.includeSubagents ||
+              (thread.lineage.relationshipToParent !== "subagent" &&
+                thread.lineage.relationshipToParent !== "aside"),
           )
           .toSorted(
             (left, right) =>

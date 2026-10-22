@@ -1,3 +1,4 @@
+import { ThreadId } from "@t3tools/contracts";
 import type {
   EditorId,
   EnvironmentId,
@@ -26,6 +27,7 @@ import { ThreadPullRequestsPanel } from "../pullRequest/ThreadPullRequestsPanel"
 const PreviewPanel = lazy(() =>
   import("../preview/PreviewPanel").then((module) => ({ default: module.PreviewPanel })),
 );
+const AsideChat = lazy(() => import("../ChatView"));
 const DiffPanel = lazy(() => import("../DiffPanel"));
 const DevicePanel = lazy(() =>
   import("../device/DevicePanel").then((module) => ({ default: module.DevicePanel })),
@@ -82,6 +84,20 @@ export function RightPanelSurfaceContent(props: {
   const { surface, threadRef, visible } = props;
   if (surface === null) return null;
   switch (surface.kind) {
+    case "aside":
+      return (
+        <Suspense fallback={null}>
+          <AsideChat
+            embedded
+            onEmbeddedThreadOpen={(threadId) =>
+              useRightPanelStore.getState().openAside(threadRef, threadId)
+            }
+            environmentId={props.environmentId}
+            threadId={ThreadId.make(surface.resourceId)}
+            routeKind="server"
+          />
+        </Suspense>
+      );
     case "preview":
       return (
         <Suspense fallback={null}>

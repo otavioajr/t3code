@@ -36,7 +36,11 @@ export interface ThreadRelationshipWalkRow {
 export function resolveMergeBackTargetThreadId(
   projection: Pick<OrchestrationV2ThreadProjection, "thread"> | null,
 ): ThreadId | null {
-  if (projection?.thread.lineage.relationshipToParent !== "fork") return null;
+  if (
+    projection?.thread.lineage.relationshipToParent !== "fork" &&
+    projection?.thread.lineage.relationshipToParent !== "aside"
+  )
+    return null;
   return projection.thread.forkedFrom?.type === "run"
     ? projection.thread.forkedFrom.threadId
     : projection.thread.lineage.parentThreadId;
