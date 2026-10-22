@@ -67,10 +67,8 @@ jobs:
       - name: Build server and web client
         run: vp run --filter t3 build
 
-      # Keep VP_NODE_VERSION in step with SEA_NODE_VERSION in apps/server/vite.config.ts.
+      # Runs on the Node from package.json, which the CLI executable requires.
       - name: Build CLI single-executable
-        env:
-          VP_NODE_VERSION: "26.8.2"
         run: node apps/server/scripts/cli.ts build-exe --verbose
 
       - name: Build resource monitor
