@@ -37,6 +37,9 @@ const WRITING_STYLE_LABELS: Record<string, string> = {
 /** Human labels for the values the chain can show; falls back to a type summary. */
 function formatValue(key: keyof ServerSettings, value: unknown): string {
   if (value === null || value === undefined) {
+    if (key === "explorerSubagentModelSelection" || key === "executionSubagentModelSelection") {
+      return "Parent thread model";
+    }
     return key === "pullRequestMergeMethod"
       ? "Last selected"
       : key === "sidebarAutoSettleAfterDays"

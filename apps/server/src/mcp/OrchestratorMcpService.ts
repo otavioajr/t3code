@@ -1,6 +1,7 @@
 import {
   CommandId,
   type RunId,
+  type ServerSettings as ServerSettingsValue,
   isProviderAvailable,
   MessageId,
   type ModelSelection,
@@ -58,6 +59,7 @@ import {
   type ServerProvider,
   ThreadId,
 } from "@t3tools/contracts";
+import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { runRanAfter } from "@t3tools/shared/orchestrationV2ThreadError";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -263,6 +265,27 @@ function scheduledTaskSummary(task: ScheduledTask, mayRun: boolean): Orchestrato
       ? {}
       : { webhookSignature: task.webhook.hasSecret ? "set" : "none" }),
   };
+}
+
+function presetTargetForRole(
+  settings: ServerSettingsValue,
+  projectId: ProjectId | null,
+  role: OrchestratorMcpDelegateTaskInput["role"],
+): OrchestratorMcpTarget | null {
+  const effective = resolveProjectSettings(settings, projectId).settings;
+  const selection =
+    role === "research"
+      ? effective.explorerSubagentModelSelection
+      : role === "implementation" || role === "test"
+        ? effective.executionSubagentModelSelection
+        : null;
+  return selection === null
+    ? null
+    : {
+        providerInstanceId: selection.instanceId,
+        model: selection.model,
+        options: selection.options ?? [],
+      };
 }
 
 function providerConstraints(
@@ -1902,11 +1925,19 @@ const make = Effect.gen(function* () {
         const providers = yield* loadProviders;
         const orchestrationCapableInstanceIds = yield* loadOrchestrationCapableInstanceIds();
         // Models the user hid from pickers stay out of the catalog agents choose from.
-        const modelPreferences = yield* serverSettings.getSettings.pipe(
-          Effect.map((settings) => settings.providerModelPreferences ?? {}),
+        const settings = yield* serverSettings.getSettings.pipe(
           Effect.mapError(() => failure("orchestration_error", "Unable to read server settings.")),
         );
+        const modelPreferences = settings.providerModelPreferences ?? {};
         return {
+          subagentPresets: {
+            explorer: presetTargetForRole(settings, parent?.thread.projectId ?? null, "research"),
+            execution: presetTargetForRole(
+              settings,
+              parent?.thread.projectId ?? null,
+              "implementation",
+            ),
+          },
           parentThreadId: parent?.thread.id ?? null,
           inheritedProviderInstanceId: parent?.thread.modelSelection.instanceId ?? null,
           inheritedModel: parent?.thread.modelSelection.model ?? null,
@@ -1984,9 +2015,21 @@ const make = Effect.gen(function* () {
           operation: "delegate-task",
         });
         const isRetryOfAcceptedDelegation = yield* threadManagement.hasReceipt(commandId);
+        const presetTarget =
+          input.target === undefined
+            ? presetTargetForRole(
+                yield* serverSettings.getSettings.pipe(
+                  Effect.mapError(() =>
+                    failure("orchestration_error", "Unable to read server settings."),
+                  ),
+                ),
+                parent.thread.projectId,
+                input.role,
+              )
+            : null;
         const target = yield* resolveTargetRechecking({
           parent,
-          target: input.target,
+          target: input.target ?? presetTarget ?? undefined,
           providers,
           skipProjectEnablementFilter: isRetryOfAcceptedDelegation,
         });

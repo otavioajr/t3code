@@ -1175,6 +1175,225 @@ describe("OrchestratorMcpService provider resolution", () => {
       }),
   );
 
+  it.effect("applies role presets, project overrides, and explicit target precedence", () =>
+    Effect.gen(function* () {
+      for (const testCase of [
+        { role: "research", explicit: false, project: false, expected: antigravityInstanceId },
+        {
+          role: "implementation",
+          explicit: false,
+          project: false,
+          expected: antigravityInstanceId,
+        },
+        { role: "test", explicit: false, project: false, expected: antigravityInstanceId },
+        { role: "research", explicit: true, project: false, expected: codexInstanceId },
+        { role: "research", explicit: false, project: true, expected: codexInstanceId },
+        { role: "review", explicit: false, project: false, expected: codexInstanceId },
+        { role: "design", explicit: false, project: false, expected: codexInstanceId },
+        { role: "general", explicit: false, project: false, expected: codexInstanceId },
+        { role: undefined, explicit: false, project: false, expected: codexInstanceId },
+        {
+          role: "research",
+          explicit: false,
+          project: false,
+          disabled: true,
+          expected: antigravityInstanceId,
+        },
+        { role: "research", explicit: false, project: true, off: true, expected: codexInstanceId },
+        {
+          role: "research",
+          explicit: false,
+          project: false,
+          projectDisabled: true,
+          expected: antigravityInstanceId,
+        },
+        {
+          role: "research",
+          explicit: false,
+          project: false,
+          missingAdapter: true,
+          expected: antigravityInstanceId,
+        },
+      ] as const) {
+        let delegated = false;
+        const preset = {
+          instanceId: antigravityInstanceId,
+          model: "ant-model",
+          options: [{ id: "reasoningEffort", value: "high" }],
+        };
+        const projectPreset =
+          "off" in testCase ? null : { instanceId: codexInstanceId, model: "gpt-5.4", options: [] };
+        const task = {
+          id: taskId,
+          threadId: parentThreadId,
+          runId: parentRunId,
+          parentNodeId,
+          origin: "app_owned",
+          createdBy: "agent",
+          driver: ProviderDriverKind.make("antigravity"),
+          providerInstanceId: antigravityInstanceId,
+          providerThreadId: null,
+          childThreadId,
+          nativeTaskRef: null,
+          prompt: "Summarize the diff.",
+          title: null,
+          model: "ant-model",
+          status: "running",
+          result: null,
+          startedAt: null,
+          completedAt: null,
+        };
+        const dispatched = yield* Ref.make<ReadonlyArray<unknown>>([]);
+        const layerDependencies = Layer.mergeAll(
+          NodeServices.layer,
+          Layer.mock(ThreadManagementService.ThreadManagementService)({
+            hasReceipt: () => Effect.succeed(false),
+            getThreadRecords: (threadId) =>
+              Effect.succeed(
+                threadId === parentThreadId
+                  ? parentProjection(delegated ? [task] : [])
+                  : childProjection,
+              ),
+            dispatch: (command) => {
+              if ("projectDisabled" in testCase) {
+                assert.equal(command.type, "delegated_task.request");
+                if (command.type === "delegated_task.request") {
+                  assert.equal(command.modelSelection.instanceId, antigravityInstanceId);
+                }
+                return Effect.fail(
+                  new ThreadManagementService.ThreadManagementProviderInstanceDisabledError({
+                    projectId,
+                    instanceId: antigravityInstanceId,
+                  }),
+                );
+              }
+              return Ref.update(dispatched, (commands) => [...commands, command]).pipe(
+                Effect.andThen(
+                  Effect.sync(() => {
+                    delegated = true;
+                  }),
+                ),
+                Effect.as({
+                  sequence: 1,
+                  storedEvents: [
+                    {
+                      sequence: 1,
+                      commandId: null,
+                      event: { type: "subagent.updated", payload: task },
+                    },
+                  ],
+                } as never),
+              );
+            },
+          }),
+          ServerSettings.layerTest({
+            explorerSubagentModelSelection: preset,
+            executionSubagentModelSelection: preset,
+            projectSettingsOverrides: testCase.project
+              ? { [projectId]: { explorerSubagentModelSelection: projectPreset } }
+              : {},
+          }),
+          providerRegistryLayer([
+            providerSnapshot({
+              instanceId: codexInstanceId,
+              driver: ProviderDriverKind.make("codex"),
+              model: "gpt-5.4",
+            }),
+            {
+              ...providerSnapshot({
+                instanceId: antigravityInstanceId,
+                driver: ProviderDriverKind.make("antigravity"),
+                model: "ant-model",
+                enabled: !("disabled" in testCase),
+              }),
+              models: [
+                {
+                  slug: "ant-model",
+                  name: "Ant",
+                  isCustom: false,
+                  capabilities: {
+                    optionDescriptors: [
+                      {
+                        id: "reasoningEffort",
+                        label: "Effort",
+                        type: "select",
+                        options: [{ id: "high", label: "High" }],
+                      },
+                    ],
+                  },
+                },
+              ],
+            },
+          ]),
+          adapterRegistryLayer(
+            "missingAdapter" in testCase
+              ? [codexInstanceId]
+              : [codexInstanceId, antigravityInstanceId],
+          ),
+          Layer.mock(ProjectService.ProjectService)({}),
+          Layer.mock(SecretRequests.SecretRequests)({}),
+          Layer.mock(ScheduledTaskService.ScheduledTaskService)({}),
+        );
+
+        yield* Effect.gen(function* () {
+          const service = yield* OrchestratorMcpService.OrchestratorMcpService;
+          const capabilities = yield* service.capabilities(scope);
+          assert.deepEqual(capabilities.subagentPresets, {
+            explorer: testCase.project
+              ? projectPreset === null
+                ? null
+                : { providerInstanceId: codexInstanceId, model: "gpt-5.4", options: [] }
+              : {
+                  providerInstanceId: antigravityInstanceId,
+                  model: "ant-model",
+                  options: preset.options,
+                },
+            execution: {
+              providerInstanceId: antigravityInstanceId,
+              model: "ant-model",
+              options: preset.options,
+            },
+          });
+          const delegation = service.delegateTask(scope, {
+            task: "Summarize the diff.",
+            role: testCase.role,
+            ...(testCase.explicit ? { target: { model: "gpt-5.4" } } : {}),
+            mode: "async",
+            clientRequestId: "delegate-preset-1",
+          });
+          if (
+            "disabled" in testCase ||
+            "projectDisabled" in testCase ||
+            "missingAdapter" in testCase
+          ) {
+            const error = yield* delegation.pipe(Effect.flip);
+            assert.equal(
+              error.code,
+              "projectDisabled" in testCase ? "invalid_request" : "provider_unavailable",
+            );
+            assert.deepEqual(yield* Ref.get(dispatched), []);
+            return;
+          }
+          yield* delegation;
+          const commands = yield* Ref.get(dispatched);
+          assert.equal(commands.length, 1);
+          const request = commands[0] as {
+            type: string;
+            modelSelection: { instanceId: string; model: string; options?: ReadonlyArray<unknown> };
+          };
+          assert.equal(request.type, "delegated_task.request");
+          assert.equal(request.modelSelection.instanceId, testCase.expected);
+          assert.equal(
+            request.modelSelection.model,
+            testCase.expected === antigravityInstanceId ? "ant-model" : "gpt-5.4",
+          );
+          if (testCase.expected === antigravityInstanceId)
+            assert.deepEqual(request.modelSelection.options, preset.options);
+        }).pipe(Effect.provide(layerOrchestratorService.pipe(Layer.provide(layerDependencies))));
+      }
+    }),
+  );
+
   it.effect("resolves a driverKind target to a capable Antigravity instance", () =>
     Effect.gen(function* () {
       const dispatched = yield* Ref.make<ReadonlyArray<unknown>>([]);

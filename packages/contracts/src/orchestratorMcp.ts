@@ -173,7 +173,12 @@ export const OrchestratorMcpDelegateTaskInput = Schema.Struct({
   }),
   target: Schema.optional(OrchestratorMcpTarget),
   title: Schema.optional(OrchestratorMcpTitle),
-  role: Schema.optional(OrchestratorMcpTaskRole),
+  role: Schema.optional(
+    OrchestratorMcpTaskRole.annotate({
+      description:
+        "Research uses the explorer preset and implementation/test use the execution preset when target is omitted.",
+    }),
+  ),
   isolation: Schema.optional(
     Schema.Literals(["shared", "worktree"]).annotate({
       description:
@@ -515,6 +520,10 @@ export const OrchestratorMcpCapabilitiesResult = Schema.Struct({
   inheritedModel: Schema.NullOr(Schema.String),
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode,
+  subagentPresets: Schema.Struct({
+    explorer: Schema.NullOr(OrchestratorMcpTarget),
+    execution: Schema.NullOr(OrchestratorMcpTarget),
+  }),
   providers: Schema.Array(OrchestratorMcpProviderCapability),
   features: Schema.Struct({
     appOwnedSubagents: Schema.Boolean,

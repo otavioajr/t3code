@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { EnvironmentId, ProviderInstanceId } from "@t3tools/contracts";
 
+import { SubagentSettings } from "../components/settings/SubagentSettings";
 import { ProviderSettingsPanel } from "../components/settings/ProviderSettingsPanel";
 import { useSettingsScope } from "../components/settings/SettingsScopeContext";
 
@@ -22,18 +23,21 @@ function SettingsProvidersRoute() {
     );
   }
   return (
-    <ProviderSettingsPanel
-      environmentId={environment.environmentId}
-      {...(target.instanceId ? { instanceId: target.instanceId } : {})}
-      projectIds={
-        scope.kind === "project" || scope.kind === "checkout"
-          ? scope.members
-              .filter((member) => member.environmentId === environment.environmentId)
-              .map((member) => member.id)
-          : []
-      }
-      scoped
-    />
+    <>
+      <ProviderSettingsPanel
+        environmentId={environment.environmentId}
+        {...(target.instanceId ? { instanceId: target.instanceId } : {})}
+        projectIds={
+          scope.kind === "project" || scope.kind === "checkout"
+            ? scope.members
+                .filter((member) => member.environmentId === environment.environmentId)
+                .map((member) => member.id)
+            : []
+        }
+        scoped
+      />
+      <SubagentSettings />
+    </>
   );
 }
 

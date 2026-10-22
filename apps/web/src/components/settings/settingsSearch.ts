@@ -887,6 +887,22 @@ export const SETTINGS_SEARCH_ITEMS = [
     environmentOnly: true,
   },
   {
+    id: "explorer-subagent-model",
+    title: "Explorer model",
+    to: "/settings/providers",
+    searchTerms: ["subagents delegation preset model effort research exploration"],
+    environmentOnly: true,
+    scope: "project-defaults",
+  },
+  {
+    id: "execution-subagent-model",
+    title: "Execution model",
+    to: "/settings/providers",
+    searchTerms: ["subagents delegation preset model effort implementation test"],
+    environmentOnly: true,
+    scope: "project-defaults",
+  },
+  {
     id: "review-guide-model",
     title: "Review guide model",
     to: "/settings/source-control",

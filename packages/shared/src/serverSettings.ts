@@ -623,6 +623,12 @@ export function applyServerSettingsPatch(
     ...(patch.sourceControlWriterModelSelection !== undefined
       ? { sourceControlWriterModelSelection: patch.sourceControlWriterModelSelection }
       : {}),
+    ...(patch.explorerSubagentModelSelection !== undefined
+      ? { explorerSubagentModelSelection: patch.explorerSubagentModelSelection }
+      : {}),
+    ...(patch.executionSubagentModelSelection !== undefined
+      ? { executionSubagentModelSelection: patch.executionSubagentModelSelection }
+      : {}),
     ...(patch.reviewGuideModelSelection !== undefined
       ? { reviewGuideModelSelection: patch.reviewGuideModelSelection }
       : {}),
