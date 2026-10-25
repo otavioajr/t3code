@@ -334,7 +334,6 @@ function PluginsInstancePanel({
   });
 
   useEffect(() => {
-    // oxlint-disable-next-line react/set-state-in-effect -- State changes only after the list response arrives.
     void requestPlugins();
   }, [requestPlugins]);
 
