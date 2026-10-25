@@ -762,7 +762,7 @@ const make = Effect.gen(function* () {
             (thread) =>
               input.includeSubagents ||
               (thread.lineage.relationshipToParent !== "subagent" &&
-                thread.lineage.relationshipToParent !== "aside"),
+                thread.lineage.presentation !== "aside"),
           )
           .toSorted(
             (left, right) =>

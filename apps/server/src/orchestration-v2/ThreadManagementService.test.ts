@@ -444,13 +444,17 @@ it.effect.each([
 
 it.effect("hides aside and subagent threads unless explicitly included", () => {
   const at = DateTime.makeUnsafe("2026-10-22T12:00:00Z");
-  const threads = ([null, "fork", "subagent", "aside"] as const).map(
-    (relationshipToParent, index) => ({
-      id: ThreadId.make(`thread:${index}`),
-      updatedAt: at,
-      lineage: { relationshipToParent },
-    }),
-  );
+  const lineages = [
+    { relationshipToParent: null },
+    { relationshipToParent: "fork" },
+    { relationshipToParent: "subagent" },
+    { relationshipToParent: "fork", presentation: "aside" },
+  ] as const;
+  const threads = lineages.map((lineage, index) => ({
+    id: ThreadId.make(`thread:${index}`),
+    updatedAt: at,
+    lineage,
+  }));
   const testLayer = ThreadManagementService.layer.pipe(
     Layer.provide(Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({})),
     Layer.provide(

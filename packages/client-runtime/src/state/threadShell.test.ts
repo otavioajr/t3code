@@ -96,7 +96,11 @@ describe("v2 thread shell lists", () => {
     const aside = {
       ...child,
       id: ThreadId.make("aside"),
-      lineage: { ...child.lineage, relationshipToParent: "aside" as const },
+      lineage: {
+        ...child.lineage,
+        relationshipToParent: "fork" as const,
+        presentation: "aside" as const,
+      },
     };
     const snapshot = { ...v2ShellSnapshot, threads: [root, child, fork, aside] };
     registry.set(snapshotAtom(environmentId), snapshot);

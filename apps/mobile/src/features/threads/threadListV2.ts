@@ -240,7 +240,7 @@ export function getThreadListV2OrderedSection(input: {
     if (
       thread.archivedAt !== null ||
       thread.lineage.relationshipToParent === "subagent" ||
-      thread.lineage.relationshipToParent === "aside"
+      thread.lineage.presentation === "aside"
     )
       return false;
     if (
@@ -624,7 +624,7 @@ export function buildThreadListV2Items(input: {
     (thread) =>
       thread.archivedAt === null &&
       thread.lineage.relationshipToParent !== "subagent" &&
-      thread.lineage.relationshipToParent !== "aside" &&
+      thread.lineage.presentation !== "aside" &&
       (input.environmentId === null || thread.environmentId === input.environmentId) &&
       (projectKeys === null || projectKeys.has(`${thread.environmentId}:${thread.projectId}`)),
   );

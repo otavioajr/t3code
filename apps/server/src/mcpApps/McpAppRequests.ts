@@ -171,10 +171,7 @@ const make = Effect.gen(function* () {
         .getThreadRecords(current, [])
         .pipe(Effect.mapError((cause) => fail(threadId, "request-failed", cause)));
       const { lineage } = records.thread;
-      current =
-        lineage.relationshipToParent === "fork" || lineage.relationshipToParent === "aside"
-          ? lineage.parentThreadId
-          : null;
+      current = lineage.relationshipToParent === "fork" ? lineage.parentThreadId : null;
     }
     return false;
   });

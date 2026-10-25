@@ -411,7 +411,7 @@ export function createEnvironmentThreadShellAtoms(input: {
         if (
           thread.archivedAt !== null ||
           thread.lineage.relationshipToParent === "subagent" ||
-          thread.lineage.relationshipToParent === "aside"
+          thread.lineage.presentation === "aside"
         )
           continue;
         next.push(scopedThread(environmentId, thread, subagentRequests));

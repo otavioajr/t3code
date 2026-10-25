@@ -247,7 +247,8 @@ it.effect("rejects in-progress and rolled-back fork sources", () =>
 it.effect("creates an aside with inherited model and fork context", () =>
   Effect.gen(function* () {
     const result = yield* planFork(makeSourceRun("completed"), undefined, "aside");
-    assert.equal(result.targetThread.lineage.relationshipToParent, "aside");
+    assert.equal(result.targetThread.lineage.relationshipToParent, "fork");
+    assert.equal(result.targetThread.lineage.presentation, "aside");
     assert.equal(result.targetThread.title, "Snoozed source aside");
     assert.deepEqual(result.targetThread.modelSelection, modelSelection);
     assert.deepEqual(result.targetThread.forkedFrom, {

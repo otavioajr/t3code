@@ -1210,7 +1210,7 @@ it("excludes subagents from navigation, search and ordering while retaining user
   const aside = makeThread({
     ...child,
     id: ThreadId.make("aside"),
-    lineage: { ...child.lineage, relationshipToParent: "aside" },
+    lineage: { ...child.lineage, relationshipToParent: "fork", presentation: "aside" },
   });
   const threads = [root, child, fork, aside];
   expect(

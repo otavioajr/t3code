@@ -4115,7 +4115,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       );
 
     if (
-      !["fork", "aside"].includes(sourceProjection.thread.lineage.relationshipToParent ?? "") ||
+      sourceProjection.thread.lineage.relationshipToParent !== "fork" ||
       sourceProjection.thread.lineage.parentThreadId !== command.targetThreadId
     ) {
       return yield* new OrchestratorDispatchError({

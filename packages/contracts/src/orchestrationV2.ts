@@ -117,7 +117,10 @@ export type OrchestrationV2ProviderRef = typeof OrchestrationV2ProviderRef.Type;
 
 export const OrchestrationV2AppThreadLineage = Schema.Struct({
   parentThreadId: Schema.NullOr(ThreadId),
-  relationshipToParent: Schema.NullOr(Schema.Literals(["fork", "subagent", "aside"])),
+  relationshipToParent: Schema.NullOr(Schema.Literals(["fork", "subagent"])),
+  // An aside is a fork shown in the right panel. A separate field, not a relationship, so
+  // upstream clients that reject unknown relationships still decode it as a plain fork.
+  presentation: Schema.optional(Schema.Literal("aside")),
   rootThreadId: ThreadId,
 });
 export type OrchestrationV2AppThreadLineage = typeof OrchestrationV2AppThreadLineage.Type;
