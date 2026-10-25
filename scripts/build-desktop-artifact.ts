@@ -2705,6 +2705,15 @@ export const resolveGitHubPublishConfig = Effect.fn("resolveGitHubPublishConfig"
   };
 });
 
+// Forks without an Apple Developer ID sign with their own certificate: Squirrel.Mac only
+// installs an update whose signature matches the running app's certificate.
+export const resolveMacSelfSignIdentity = Effect.fn("resolveMacSelfSignIdentity")(function* () {
+  const identity = yield* Config.String("T3CODE_DESKTOP_MAC_SELF_SIGN_IDENTITY").pipe(
+    Config.option,
+  );
+  return Option.getOrUndefined(identity)?.trim() || undefined;
+});
+
 export function resolveDesktopUpdateChannel(version: string): "latest" | "nightly" {
   return /-nightly\.\d{8}\.\d+$/.test(version) ? "nightly" : "latest";
 }
@@ -2818,6 +2827,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   if (platform === "mac") {
     const path = yield* Path.Path;
     const repoRoot = yield* RepoRoot;
+    const selfSignIdentity = signed ? undefined : yield* resolveMacSelfSignIdentity();
     buildConfig.mac = {
       target: target === "dmg" ? [target, "zip"] : [target],
       icon: "icon.icns",
@@ -2856,6 +2866,9 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
         },
       ],
       ...(signed ? { sign: path.join(repoRoot, "scripts/sign-macos.ts") } : {}),
+      // Without notarization the hardened runtime only withholds camera, microphone and other
+      // entitlements the unsigned build has.
+      ...(selfSignIdentity ? { identity: selfSignIdentity, hardenedRuntime: false } : {}),
       ...(macPasskeySigning
         ? {
             entitlements: macPasskeySigning.entitlementsPath,

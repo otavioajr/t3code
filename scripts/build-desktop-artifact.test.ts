@@ -523,6 +523,44 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     ),
   );
 
+  it.effect("signs unsigned macOS builds with a configured self-signed identity", () =>
+    Effect.gen(function* () {
+      const selfSigned = yield* createBuildConfig(
+        "mac",
+        "dmg",
+        "0.0.33-fork.1",
+        false,
+        false,
+        undefined,
+        undefined,
+      );
+      const developerIdSigned = yield* createBuildConfig(
+        "mac",
+        "dmg",
+        "0.0.33",
+        true,
+        false,
+        undefined,
+        undefined,
+      );
+
+      assert.include(selfSigned.mac as object, {
+        identity: "T3 Code Fork Signing",
+        hardenedRuntime: false,
+      });
+      assert.notProperty(developerIdSigned.mac as object, "identity");
+      assert.notProperty(developerIdSigned.mac as object, "hardenedRuntime");
+    }).pipe(
+      Effect.provide(
+        ConfigProvider.layer(
+          ConfigProvider.fromEnv({
+            env: { T3CODE_DESKTOP_MAC_SELF_SIGN_IDENTITY: "T3 Code Fork Signing" },
+          }),
+        ),
+      ),
+    ),
+  );
+
   // pnpm writes "set this to true or false" placeholders into allowBuilds when a
   // tarball changes. pnpm ignores them, but the release build decode rejects them.
   it.effect("decodes the repo allowBuilds and every file: tarball it names exists", () =>

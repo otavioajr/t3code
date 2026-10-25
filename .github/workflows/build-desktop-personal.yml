@@ -1,10 +1,13 @@
 name: Build desktop (personal)
 
-# Unsigned macOS and Windows installers for personal installs of this fork.
-# Run it by hand from the Actions tab; the installers are uploaded as run
-# artifacts. Nothing is published, and the builds carry no update feed or
-# T3 Connect config. The Windows installer embeds the Linux CLI archive as its
-# WSL runtime, the same way release-desktop.yml does.
+# macOS and Windows installers for personal installs of this fork, published as
+# a GitHub release that installed apps update from. Run it by hand from the
+# Actions tab. Builds carry no T3 Connect config. The Windows installer embeds
+# the Linux CLI archive as its WSL runtime, the same way release-desktop.yml does.
+#
+# macOS builds are signed with a self-signed certificate (secrets
+# MAC_SELF_SIGN_P12 and MAC_SELF_SIGN_P12_PASSWORD): Squirrel.Mac installs an
+# update only when it is signed by the same certificate as the running app.
 
 on:
   workflow_dispatch:
@@ -17,18 +20,46 @@ on:
 permissions:
   contents: read
 
+env:
+  # Points the update feed and the app's release links at this fork.
+  T3CODE_DESKTOP_UPDATE_REPOSITORY: ${{ github.repository }}
+  MAC_SELF_SIGN_IDENTITY: T3 Code Fork Signing
+
 jobs:
+  # The prerelease suffix keeps installs on the stable update channel, and the
+  # run number makes every build newer than the last.
+  version:
+    name: Resolve version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      sha: ${{ steps.version.outputs.sha }}
+    steps:
+      - name: Resolve version and commit
+        id: version
+        env:
+          BUILD_REF: ${{ inputs.ref }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          sha=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${BUILD_REF}" --jq .sha)
+          base=$(gh api "repos/${GITHUB_REPOSITORY}/contents/apps/desktop/package.json?ref=${sha}" \
+            --jq '.content | @base64d | fromjson | .version')
+          echo "version=${base}-fork.${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+          echo "sha=${sha}" >> "$GITHUB_OUTPUT"
+
   # The WSL backend runs this archive inside the distro. Without it the Windows
   # app stays on "Connecting WSL" forever.
   cli_linux:
     name: Build Linux x64 CLI archive
+    needs: version
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
       - name: Checkout
         shell: bash
         env:
-          CHECKOUT_REF: ${{ inputs.ref }}
+          CHECKOUT_REF: ${{ needs.version.outputs.sha }}
           GIT_TERMINAL_PROMPT: "0"
         run: |
           set -euo pipefail
@@ -57,12 +88,10 @@ jobs:
           toolchain: stable
           targets: x86_64-unknown-linux-gnu
 
-      # The archive name must carry the app version: the Windows build
-      # rejects a WSL runtime whose top-level directory names another version.
-      - name: Read app version
-        id: version
-        shell: bash
-        run: echo "version=$(node -p "require('./apps/server/package.json').version")" >> "$GITHUB_OUTPUT"
+      # The archive must carry the app version: the Windows build rejects a WSL
+      # runtime whose top-level directory names another version.
+      - name: Align package versions to release version
+        run: node scripts/update-release-package-versions.ts "${{ needs.version.outputs.version }}"
 
       - name: Build server and web client
         run: vp run --filter t3 build
@@ -87,13 +116,13 @@ jobs:
           node scripts/build-cli-archive.ts
           --platform linux
           --arch x64
-          --version "${{ steps.version.outputs.version }}"
+          --version "${{ needs.version.outputs.version }}"
           --resource-monitor-dir "$RUNNER_TEMP/cli-resource-monitor"
           --output-dir release-cli
 
       - name: Smoke-test CLI archive
         shell: bash
-        run: node scripts/smoke-cli-archive.ts --archive release-cli/* --expect-version "${{ steps.version.outputs.version }}"
+        run: node scripts/smoke-cli-archive.ts --archive release-cli/* --expect-version "${{ needs.version.outputs.version }}"
 
       - name: Upload CLI archive
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -105,7 +134,7 @@ jobs:
 
   build:
     name: Build ${{ matrix.label }}
-    needs: cli_linux
+    needs: [version, cli_linux]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     strategy:
@@ -130,7 +159,7 @@ jobs:
       - name: Checkout
         shell: bash
         env:
-          CHECKOUT_REF: ${{ inputs.ref }}
+          CHECKOUT_REF: ${{ needs.version.outputs.sha }}
           GIT_TERMINAL_PROMPT: "0"
         run: |
           set -euo pipefail
@@ -180,6 +209,38 @@ jobs:
           name: cli-linux-x64
           path: wsl-runtime
 
+      # electron-builder signs only with an identity trusted for code signing,
+      # so the self-signed certificate is trusted system-wide on the runner.
+      - name: Import macOS signing certificate
+        if: matrix.platform == 'mac'
+        env:
+          MAC_SELF_SIGN_P12: ${{ secrets.MAC_SELF_SIGN_P12 }}
+          MAC_SELF_SIGN_P12_PASSWORD: ${{ secrets.MAC_SELF_SIGN_P12_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$MAC_SELF_SIGN_P12" || -z "$MAC_SELF_SIGN_P12_PASSWORD" ]]; then
+            echo "::error::Set the MAC_SELF_SIGN_P12 and MAC_SELF_SIGN_P12_PASSWORD secrets." >&2
+            exit 1
+          fi
+          keychain="$RUNNER_TEMP/self-sign.keychain-db"
+          keychain_password=$(uuidgen)
+          printf '%s' "$MAC_SELF_SIGN_P12" | base64 --decode > "$RUNNER_TEMP/self-sign.p12"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$RUNNER_TEMP/self-sign.p12" -k "$keychain" \
+            -P "$MAC_SELF_SIGN_P12_PASSWORD" -T /usr/bin/codesign
+          rm -f "$RUNNER_TEMP/self-sign.p12"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s \
+            -k "$keychain_password" "$keychain" > /dev/null
+          security list-keychains -d user -s "$keychain" \
+            $(security list-keychains -d user | tr -d '"')
+          security find-certificate -c "$MAC_SELF_SIGN_IDENTITY" -p "$keychain" > "$RUNNER_TEMP/self-sign.pem"
+          sudo security add-trusted-cert -d -r trustRoot -p codeSign \
+            -k /Library/Keychains/System.keychain "$RUNNER_TEMP/self-sign.pem"
+          security find-identity -v -p codesigning "$keychain" | grep -F "$MAC_SELF_SIGN_IDENTITY"
+          echo "T3CODE_DESKTOP_MAC_SELF_SIGN_IDENTITY=$MAC_SELF_SIGN_IDENTITY" >> "$GITHUB_ENV"
+
       - name: Build desktop artifact
         shell: bash
         run: |
@@ -188,6 +249,7 @@ jobs:
             --platform ${{ matrix.platform }}
             --target ${{ matrix.target }}
             --arch ${{ matrix.arch }}
+            --build-version "${{ needs.version.outputs.version }}"
             --verbose
           )
           if [[ "${{ matrix.platform }}" == "win" ]]; then
@@ -195,6 +257,19 @@ jobs:
           fi
           vp run dist:desktop:artifact "${args[@]}"
 
+      # electron-builder silently skips signing when it cannot find the
+      # identity, and Squirrel.Mac would never install an unsigned update.
+      - name: Verify macOS signature
+        if: matrix.platform == 'mac'
+        run: |
+          set -euo pipefail
+          verify_dir="$RUNNER_TEMP/verify-signature"
+          mkdir -p "$verify_dir"
+          ditto -x -k release/*.zip "$verify_dir"
+          codesign --verify --deep --strict "$verify_dir"/*.app
+          codesign -dvv "$verify_dir"/*.app 2>&1 | grep -F "Authority=$MAC_SELF_SIGN_IDENTITY"
+
+      # electron-updater downloads the zip, blockmaps and latest*.yml manifests.
       - name: Upload installer
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
@@ -202,4 +277,36 @@ jobs:
           path: |
             release/*.dmg
             release/*.exe
+            release/*.zip
+            release/*.blockmap
+            release/latest*.yml
           if-no-files-found: error
+
+  release:
+    name: Publish release
+    needs: [version, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download installers
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: t3code-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.version.outputs.version }}
+          SHA: ${{ needs.version.outputs.sha }}
+          BUILD_REF: ${{ inputs.ref }}
+        run: |
+          set -euo pipefail
+          gh release create "v${VERSION}" release-assets/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$SHA" \
+            --title "T3 Code ${VERSION}" \
+            --notes "Personal build of ${BUILD_REF} at ${SHA}." \
+            --latest
