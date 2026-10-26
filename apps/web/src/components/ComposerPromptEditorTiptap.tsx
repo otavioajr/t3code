@@ -1540,7 +1540,8 @@ function ComposerPromptEditorTiptapInner(
   });
 
   useLayoutEffect(() => {
-    if (!editor) return;
+    // A destroyed editor has no view; useEditor swaps in a fresh one, which reruns this.
+    if (!editor || editor.isDestroyed) return;
     const initialSelection = !hasAppliedControlledSelectionRef.current;
     hasAppliedControlledSelectionRef.current = true;
     const normalizedCursor = clampEditorCursor(value, cursor);
@@ -1639,7 +1640,7 @@ function ComposerPromptEditorTiptapInner(
     }
     return () => {
       // Capture focus before the keyed editor's DOM is removed.
-      restoreFocusRef.current = editor.view.hasFocus();
+      restoreFocusRef.current = !editor.isDestroyed && editor.view.hasFocus();
     };
   }, [editor, restoreFocusRef]);
 

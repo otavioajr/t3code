@@ -433,3 +433,29 @@ describe("an Arabic line", () => {
     );
   });
 });
+
+it("takes a new value after its editor view was torn down", async () => {
+  const controlled = (value: string) => (
+    <ComposerPromptEditor
+      editorRef={createRef<ComposerPromptEditorHandle>()}
+      value={value}
+      cursor={value.length}
+      richTextEnabled
+      contextRecords={new Map()}
+      skills={[]}
+      disabled={false}
+      placeholder=""
+      onChange={() => {}}
+      onPaste={() => {}}
+    />
+  );
+  await using screen = await render(controlled("draft"));
+  const editor = editorIn(screen.container);
+  await act(async () => {
+    editor.destroy();
+  });
+  await screen.rerender(controlled("restored draft"));
+  await vi.waitFor(() =>
+    expect(serializeEditorDoc(editorIn(screen.container).state.doc).value).toBe("restored draft"),
+  );
+});
