@@ -1,20 +1,6 @@
-/**
- * ProviderPlugins — install, toggle, and remove a provider's plugins and the
- * marketplaces they come from, for the Plugins settings panel.
- *
- * Claude Code and Codex each own a plugin system: marketplaces are git
- * repositories the CLI clones and caches, and the enabled state lives in the
- * provider's own config. This service drives each CLI (`claude plugin ...`,
- * `codex plugin ...`) with the instance's executable and home instead of
- * reimplementing it, so the agent, the CLI, and T3 Code always agree on what is
- * installed. Codex has no CLI verb for enabling a plugin, so that one change
- * goes through its app-server's config write, which is what the CLI reads.
- * Grok Build (`grok plugin ...`) also loads the plugins Claude Code installed,
- * so its state comes from `grok inspect`, which reports what a session loads.
- * Other providers report `unsupported_provider`.
- *
- * @module provider/ProviderPlugins
- */
+// Drives each provider's own plugin CLI (`claude plugin`, `codex plugin`) so the agent, the CLI,
+// and T3 Code agree on what is installed. Codex has no enable verb, so that goes through its
+// app-server config write. Grok loads Claude's plugins and reports them via `grok inspect`.
 import {
   ClaudeSettings,
   CodexSettings,
@@ -385,13 +371,8 @@ export function fromGrokPlugins(input: {
   };
 }
 
-/**
- * Merge the CLI's installed and available lists. Available plugins are kept
- * only for marketplaces the user added: both CLIs also list the provider's own
- * directories, thousands of entries nobody asked to browse here. A built-in
- * marketplace is listed only while one of its plugins is installed, and is
- * marked so the panel offers no update or remove for it.
- */
+// Available plugins only for marketplaces the user added: the CLIs also list thousands from
+// their own directories. A built-in marketplace shows only while one of its plugins is installed.
 export function buildPluginsSnapshot(input: {
   readonly marketplaces: ReadonlyArray<ProviderPluginMarketplace>;
   readonly installed: ReadonlyArray<{
@@ -673,7 +654,8 @@ export const makeProviderPlugins = Effect.fn("makeProviderPlugins")(function* (
             ),
       describe: (install) =>
         install.installPath === undefined
-          ? Effect.succeed(undefined)
+          ? // @effect-diagnostics-next-line effectSucceedWithVoid:off - This optional result requires undefined, not the wider void type.
+            Effect.succeed(undefined)
           : readManifestDescription(install.installPath),
       addMarketplace: (source) => run(["marketplace", "add", source]).pipe(Effect.asVoid),
       removeMarketplace: (name) => run(["marketplace", "remove", name]).pipe(Effect.asVoid),
@@ -732,6 +714,7 @@ export const makeProviderPlugins = Effect.fn("makeProviderPlugins")(function* (
         ),
       describe: (install) => {
         const at = install.id.lastIndexOf("@");
+        // @effect-diagnostics-next-line effectSucceedWithVoid:off - This optional result requires undefined, not the wider void type.
         if (at <= 0 || install.version === undefined) return Effect.succeed(undefined);
         return readManifestDescription(
           path.join(
@@ -840,7 +823,8 @@ export const makeProviderPlugins = Effect.fn("makeProviderPlugins")(function* (
         ),
       describe: (install) =>
         install.installPath === undefined
-          ? Effect.succeed(undefined)
+          ? // @effect-diagnostics-next-line effectSucceedWithVoid:off - This optional result requires undefined, not the wider void type.
+            Effect.succeed(undefined)
           : readManifestDescription(install.installPath),
       addMarketplace: (source) => run(["marketplace", "add", source]).pipe(Effect.asVoid),
       // Grok removes a source by its URL or path, not its name.

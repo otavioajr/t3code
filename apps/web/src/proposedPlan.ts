@@ -1,47 +1,5 @@
 import { stripDisplayedPlanMarkdown, proposedPlanTitle } from "@t3tools/shared/proposedPlanText";
 
-export function buildCollapsedProposedPlanPreviewMarkdown(
-  planMarkdown: string,
-  options?: {
-    maxLines?: number;
-  },
-): string {
-  const maxLines = options?.maxLines ?? 8;
-  const lines = stripDisplayedPlanMarkdown(planMarkdown)
-    .trimEnd()
-    .split(/\r?\n/)
-    .map((line) => line.trimEnd());
-  const previewLines: string[] = [];
-  let visibleLineCount = 0;
-  let hasMoreContent = false;
-
-  for (const line of lines) {
-    const isVisibleLine = line.trim().length > 0;
-    if (isVisibleLine && visibleLineCount >= maxLines) {
-      hasMoreContent = true;
-      break;
-    }
-    previewLines.push(line);
-    if (isVisibleLine) {
-      visibleLineCount += 1;
-    }
-  }
-
-  while (previewLines.length > 0 && previewLines.at(-1)?.trim().length === 0) {
-    previewLines.pop();
-  }
-
-  if (previewLines.length === 0) {
-    return proposedPlanTitle(planMarkdown) ?? "Plan preview unavailable.";
-  }
-
-  if (hasMoreContent) {
-    previewLines.push("", "...");
-  }
-
-  return previewLines.join("\n");
-}
-
 /**
  * The first paragraph after the plan's title as one line of plain text, or null when the plan
  * has none. Headings are skipped and a fenced code block is never a summary.
@@ -82,10 +40,10 @@ function sanitizePlanFileSegment(input: string): string {
   return sanitized.length > 0 ? sanitized : "plan";
 }
 
-export const PLAN_IMPLEMENTATION_PROMPT_PREFIX = "PLEASE IMPLEMENT THIS PLAN:\n";
+const PLAN_IMPLEMENTATION_PROMPT_PREFIX = "PLEASE IMPLEMENT THIS PLAN:\n";
 
 /** Prefix of the message that has the main agent delegate the plan to a subagent and review it. */
-export const PLAN_SUBAGENT_BUILD_PROMPT_PREFIX = "BUILD THIS PLAN WITH A T3 SUBAGENT:\n";
+const PLAN_SUBAGENT_BUILD_PROMPT_PREFIX = "BUILD THIS PLAN WITH A T3 SUBAGENT:\n";
 
 /**
  * Prepended to a message sent in plan-first mode, for providers without a native plan mode.

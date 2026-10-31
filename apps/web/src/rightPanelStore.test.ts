@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it } from "vite-plus/test";
 import { useClosedViewStore } from "./closedViewStore";
 import { reopenClosedView } from "./reopenClosedView";
 import {
+  hostRightPanel,
   migratePersistedRightPanelState,
   pullRequestSurface,
   pullRequestSurfaceId,
@@ -39,18 +40,14 @@ async function reloadRightPanelStore() {
 }
 
 describe("rightPanelStore", () => {
-  it("persists aside tabs and custom terminal names through v15 migration", async () => {
+  it("persists custom terminal names through v15 migration", async () => {
     const store = useRightPanelStore.getState();
-    store.openAside(refA, ThreadId.make("aside-1"));
     store.openTerminal(refA, "terminal-1");
     store.renameSurface(refA, "terminal:terminal-1", " Build ");
     await reloadRightPanelStore();
     expect(
       selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA).surfaces,
-    ).toMatchObject([
-      { kind: "aside", resourceId: "aside-1" },
-      { kind: "terminal", title: "Build" },
-    ]);
+    ).toMatchObject([{ kind: "terminal", title: "Build" }]);
     const migrated = migratePersistedRightPanelState({
       byThreadKey: useRightPanelStore.getState().byThreadKey,
     });
@@ -65,6 +62,7 @@ describe("rightPanelStore", () => {
       selectActiveRightPanelSurface(useRightPanelStore.getState().byThreadKey, refA),
     ).toMatchObject({ title: "Device" });
   });
+
   it("reopens a terminal tab with its name", async () => {
     const store = useRightPanelStore.getState();
     store.openTerminal(refA, "terminal-1");
@@ -83,6 +81,24 @@ describe("rightPanelStore", () => {
       selectActiveRightPanelSurface(useRightPanelStore.getState().byThreadKey, refA),
     ).toMatchObject({ title: "Build" });
   });
+
+  it("opens a hosted side chat's panel actions in its parent's panel until unhosted", () => {
+    const store = useRightPanelStore.getState();
+    const unhost = hostRightPanel(refB, refA);
+    store.openFile(refB, "src/app.ts");
+    expect(selectActiveRightPanelSurface(useRightPanelStore.getState().byThreadKey, refA)?.id).toBe(
+      "file:src/app.ts",
+    );
+    expect(
+      selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refB).surfaces,
+    ).toEqual([]);
+    unhost();
+    store.openFile(refB, "src/app.ts");
+    expect(selectActiveRightPanelSurface(useRightPanelStore.getState().byThreadKey, refB)?.id).toBe(
+      "file:src/app.ts",
+    );
+  });
+
   it("records single and bulk tab closes, newest first", () => {
     const store = useRightPanelStore.getState();
     const pr = pullRequestSurface({
@@ -1282,6 +1298,24 @@ describe("rightPanelStore", () => {
       activeSurfaceId: "browser:hidden-tab",
       surfaces: [{ id: "browser:hidden-tab", kind: "preview", resourceId: "hidden-tab" }],
     });
+  });
+
+  it("hides the panel when browser reconciliation removes its last session tab", () => {
+    const store = useRightPanelStore.getState();
+    store.openBrowser(refA, "tab-a");
+    store.reconcileBrowserSurfaces(refA, []);
+    expect(selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA)).toEqual({
+      isOpen: false,
+      activeSurfaceId: null,
+      surfaces: [],
+    });
+
+    store.openBrowser(refA, "tab-b");
+    store.open(refA, "diff");
+    store.reconcileBrowserSurfaces(refA, []);
+    expect(
+      selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA),
+    ).toMatchObject({ isOpen: true, activeSurfaceId: "diff" });
   });
 
   it("moves a surface to a new index and keeps it there through browser reconciliation", () => {

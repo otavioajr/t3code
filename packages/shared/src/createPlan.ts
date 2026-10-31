@@ -8,8 +8,8 @@ import * as Schema from "effect/Schema";
  */
 
 export const CREATE_PLAN_TOOL_NAME = "create_plan";
-export const CREATE_PLAN_MAX_TITLE_LENGTH = 200;
-export const CREATE_PLAN_MAX_MARKDOWN_LENGTH = 200_000;
+const CREATE_PLAN_MAX_TITLE_LENGTH = 200;
+const CREATE_PLAN_MAX_MARKDOWN_LENGTH = 200_000;
 
 export const CreatePlanInput = Schema.Struct({
   title: Schema.String.check(

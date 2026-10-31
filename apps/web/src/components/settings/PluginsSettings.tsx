@@ -333,6 +333,7 @@ function PluginsInstancePanel({
     }
   });
 
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- loads the provider CLI's plugin list over RPC while the panel is mounted
   useEffect(() => {
     void requestPlugins();
   }, [requestPlugins]);
@@ -349,6 +350,7 @@ function PluginsInstancePanel({
     setLoading(false);
   });
 
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- reloads from the provider CLI when another row changed its marketplaces
   useEffect(() => {
     if (lastReloadSignalRef.current === reloadSignal) return;
     lastReloadSignalRef.current = reloadSignal;
