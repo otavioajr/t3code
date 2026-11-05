@@ -2,12 +2,14 @@ import {
   type CustomModelSetting,
   type ModelCapabilities,
   type ModelSelection,
+  type ProviderOptionDescriptor,
   ProviderDriverKind,
   type ServerProviderModel,
   type ServerProviderUpdateRequiredModel,
 } from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import {
+  CLAUDE_WORKFLOW_OPTION_IDS,
   getModelSelectionStringOptionValue,
   getProviderOptionCurrentValue,
   getProviderOptionDescriptors,
@@ -37,6 +39,105 @@ export interface ClaudeModelCatalog {
   readonly models: ReadonlyArray<ClaudeCatalogModel>;
 }
 
+const ULTRACODE_DESCRIPTOR: ProviderOptionDescriptor = {
+  id: "ultracode",
+  label: "Ultracode",
+  description: "Multi-agent workflow orchestration at any effort level",
+  type: "boolean",
+};
+
+const WORKFLOW_DESCRIPTORS: ReadonlyArray<ProviderOptionDescriptor> = [
+  {
+    id: CLAUDE_WORKFLOW_OPTION_IDS[0],
+    label: "Workflow size",
+    description: "Guidance Claude follows when sizing workflows",
+    type: "select",
+    options: [
+      {
+        id: "auto",
+        label: "Automatic",
+        description: "Uses Claude Code's /config setting",
+        isDefault: true,
+      },
+      { id: "unrestricted", label: "Unrestricted" },
+      { id: "small", label: "Small", description: "Under 5 agents" },
+      { id: "medium", label: "Medium", description: "Under 10 agents" },
+      { id: "large", label: "Large", description: "Under 50 agents" },
+    ],
+  },
+  {
+    id: CLAUDE_WORKFLOW_OPTION_IDS[1],
+    label: "Agent model",
+    description: "Runs every workflow agent on this model, overriding the script",
+    type: "select",
+    options: [
+      { id: "auto", label: "Automatic", isDefault: true },
+      { id: "opus", label: "Opus" },
+      { id: "sonnet", label: "Sonnet" },
+      { id: "haiku", label: "Haiku" },
+      { id: "fable", label: "Fable" },
+    ],
+  },
+  {
+    id: CLAUDE_WORKFLOW_OPTION_IDS[2],
+    label: "Agent effort",
+    description: "Effort for workflow agents and subagents that don't set one",
+    type: "select",
+    options: [
+      { id: "auto", label: "Automatic", isDefault: true },
+      { id: "low", label: "Low" },
+      { id: "medium", label: "Medium" },
+      { id: "high", label: "High" },
+      { id: "xhigh", label: "Extra High" },
+      { id: "max", label: "Max" },
+    ],
+  },
+];
+
+function withWorkflowDescriptors(model: ServerProviderModel): ServerProviderModel {
+  const descriptors = model.capabilities?.optionDescriptors;
+  const ultracodeIndex =
+    descriptors?.findIndex(
+      (descriptor) => descriptor.id === "ultracode" && descriptor.type === "boolean",
+    ) ?? -1;
+  if (!descriptors || ultracodeIndex < 0) return model;
+  const missing = WORKFLOW_DESCRIPTORS.filter(
+    (workflow) => !descriptors.some((descriptor) => descriptor.id === workflow.id),
+  );
+  if (missing.length === 0) return model;
+  const next = [...descriptors];
+  next.splice(ultracodeIndex + 1, 0, ...missing);
+  return { ...model, capabilities: { ...model.capabilities, optionDescriptors: next } };
+}
+
+function splitUltracodeFromEffort(model: ServerProviderModel): ServerProviderModel {
+  return withWorkflowDescriptors(splitLegacyUltracodeEffort(model));
+}
+
+function splitLegacyUltracodeEffort(model: ServerProviderModel): ServerProviderModel {
+  const descriptors = model.capabilities?.optionDescriptors;
+  const effortIndex = descriptors?.findIndex((descriptor) => descriptor.id === "effort") ?? -1;
+  const effort = descriptors?.[effortIndex];
+  if (
+    !descriptors ||
+    effort?.type !== "select" ||
+    !effort.options.some((option) => option.id === "ultracode")
+  ) {
+    return model;
+  }
+  const hasBoolean = descriptors.some(
+    (descriptor) => descriptor.id === "ultracode" && descriptor.type === "boolean",
+  );
+  const next = [...descriptors];
+  next.splice(
+    effortIndex,
+    1,
+    { ...effort, options: effort.options.filter((option) => option.id !== "ultracode") },
+    ...(hasBoolean ? [] : [ULTRACODE_DESCRIPTOR]),
+  );
+  return { ...model, capabilities: { ...model.capabilities, optionDescriptors: next } };
+}
+
 function tryResolveClaudeModelCatalog(
   resolved: ModelCatalog.ProviderCatalog | undefined,
 ): ClaudeModelCatalog | null {
@@ -48,7 +149,7 @@ function tryResolveClaudeModelCatalog(
     const adapter = decodeClaudeModelAdapter(entry.adapter ?? {});
     if (Option.isNone(profile) || Option.isNone(adapter)) return null;
     models.push({
-      model: ModelCatalog.catalogServerModel(resolved, entry),
+      model: splitUltracodeFromEffort(ModelCatalog.catalogServerModel(resolved, entry)),
       runtime: profile.value.claudeCode ?? {},
       compatibility: adapter.value.claudeCode ?? {},
     });
@@ -233,10 +334,6 @@ export function normalizeClaudeCatalogEffort(
   const effortMap = resolveClaudeCatalogModel(catalog, model)?.runtime.effortMap;
   if (!effortMap || !Object.prototype.hasOwnProperty.call(effortMap, effort)) return effort;
   return effortMap[effort] ?? undefined;
-}
-
-export function isClaudeCatalogUltracodeEffort(effort: string | null | undefined): boolean {
-  return effort === "ultracode";
 }
 
 function resolveClaudeCatalogContextWindow(

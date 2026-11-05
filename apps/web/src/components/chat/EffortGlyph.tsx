@@ -10,9 +10,8 @@ const BASELINE_INSET = 2;
 
 type SelectDescriptor = Extract<ProviderOptionDescriptor, { type: "select" }>;
 
-// Ultracode changes the workflow, not only intensity, so it keeps its name like Ultrathink.
-// Max is named too, so the full scale stops short of it.
-const NAMED_LEVELS = new Set(["ultracode", "max"]);
+// Max is named, so the full scale stops short of it.
+const NAMED_LEVELS = new Set(["max"]);
 const OFF_LEVELS = new Set(["off", "none"]);
 
 /**

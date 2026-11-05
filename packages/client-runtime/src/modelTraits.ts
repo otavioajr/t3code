@@ -5,16 +5,36 @@ import type {
 } from "@t3tools/contracts";
 import {
   buildProviderOptionSelectionsFromDescriptors,
+  CLAUDE_WORKFLOW_OPTION_IDS,
   getProviderOptionCurrentLabel,
   getProviderOptionCurrentValue,
   isClaudeUltrathinkPrompt,
 } from "@t3tools/shared/model";
 import { REASONING_EFFORT_OPTION_IDS } from "./state/threadExecution.ts";
 
+export const WORKFLOW_SELECT_DESCRIPTOR_IDS: ReadonlySet<string> = new Set(
+  CLAUDE_WORKFLOW_OPTION_IDS,
+);
+
 export const REASONING_SELECT_DESCRIPTOR_IDS: ReadonlySet<string> = new Set([
   ...REASONING_EFFORT_OPTION_IDS,
   "thinking",
 ]);
+
+/** Workflow selects only matter while Ultracode is on; their saved values stay in the selection. */
+export function getDisplayedProviderOptionDescriptors(
+  descriptors: ReadonlyArray<ProviderOptionDescriptor>,
+): ReadonlyArray<ProviderOptionDescriptor> {
+  const ultracodeOn = descriptors.some(
+    (descriptor) =>
+      descriptor.id === "ultracode" &&
+      descriptor.type === "boolean" &&
+      descriptor.currentValue === true,
+  );
+  return ultracodeOn
+    ? descriptors
+    : descriptors.filter((descriptor) => !WORKFLOW_SELECT_DESCRIPTOR_IDS.has(descriptor.id));
+}
 
 export function replaceDescriptorCurrentValue(
   descriptors: ReadonlyArray<ProviderOptionDescriptor>,
@@ -114,9 +134,14 @@ export function buildTraitsTriggerDisplay(input: {
   let reasoningLabelIndex = -1;
   const labels: Array<string> = [];
   for (const descriptor of input.descriptors) {
+    if (WORKFLOW_SELECT_DESCRIPTOR_IDS.has(descriptor.id)) continue;
     if (descriptor.id === "fastMode" && descriptor.type === "boolean") {
       speedLabel = descriptor.currentValue === true ? "Fast" : null;
       fastModeFallbackLabel = speedLabel ?? "Normal";
+      continue;
+    }
+    if (descriptor.id === "ultracode" && descriptor.type === "boolean") {
+      if (descriptor.currentValue === true) labels.push("Ultracode");
       continue;
     }
     if (

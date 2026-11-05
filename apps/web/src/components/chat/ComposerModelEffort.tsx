@@ -6,7 +6,7 @@ import {
 } from "@t3tools/client-runtime/model-traits";
 import type { ProviderOptionDescriptor, RuntimeMode } from "@t3tools/contracts";
 import type { EffortDisplay } from "@t3tools/contracts/settings";
-import { CheckIcon, ChevronUpIcon } from "lucide-react";
+import { CheckIcon, ChevronRightIcon, ChevronUpIcon } from "lucide-react";
 import { type KeyboardEvent, type ReactNode, use, useRef } from "react";
 
 import { cn } from "~/lib/utils";
@@ -22,6 +22,7 @@ import {
   type TraitsSelectionInput,
   ULTRATHINK_IN_BODY_NOTE,
   useTraitsSelection,
+  WorkflowSubmenus,
 } from "./TraitsPicker";
 
 type SelectDescriptor = Extract<ProviderOptionDescriptor, { type: "select" }>;
@@ -104,7 +105,7 @@ export function describeComposerEffort(
         )
       : null;
   // Without a reasoning select the whole label is the word; it already names speed and the rest.
-  // Workflow levels such as Ultracode always show their name; the setting names every level.
+  // Named levels such as Max always show their name; the setting names every level.
   const word = glyph
     ? (glyph.special ?? (effortDisplay === "label" ? glyph.label : null))
     : display.label;
@@ -229,22 +230,22 @@ function EffortLevels(props: { traits: TraitsSelectionInput }) {
     const { descriptor } = control;
     if (control.kind === "boolean") {
       return (
-        <div
-          key={descriptor.id}
-          role="radiogroup"
-          aria-label={descriptor.label}
-          className="flex flex-col gap-0.5"
-        >
-          {isEffort ? null : <div className={COLUMN_LABEL}>{descriptor.label}</div>}
-          {([true, false] as const).map((value) => (
-            <ColumnRow
-              key={String(value)}
-              label={value ? "On" : "Off"}
-              selected={(control.descriptor.currentValue === true) === value}
-              level={isEffort}
-              onPick={() => traits.changeBoolean(descriptor.id, value)}
-            />
-          ))}
+        <div key={descriptor.id} className="flex flex-col gap-0.5">
+          <div role="radiogroup" aria-label={descriptor.label} className="flex flex-col gap-0.5">
+            {isEffort ? null : <div className={COLUMN_LABEL}>{descriptor.label}</div>}
+            {([true, false] as const).map((value) => (
+              <ColumnRow
+                key={String(value)}
+                label={value ? "On" : "Off"}
+                selected={(control.descriptor.currentValue === true) === value}
+                level={isEffort}
+                onPick={() => traits.changeBoolean(descriptor.id, value)}
+              />
+            ))}
+          </div>
+          {descriptor.id === "ultracode" && descriptor.currentValue === true ? (
+            <WorkflowAgentsRow traits={traits} />
+          ) : null}
         </div>
       );
     }
@@ -284,6 +285,52 @@ function EffortLevels(props: { traits: TraitsSelectionInput }) {
       {effort ? renderControl(effort) : null}
       {others.map(renderControl)}
     </>
+  );
+}
+
+function WorkflowAgentsRow(props: { traits: Parameters<typeof WorkflowSubmenus>[0]["traits"] }) {
+  const { traits } = props;
+  if (traits.workflowDescriptors.length === 0) return null;
+  const summary = traits.workflowDescriptors
+    .map((descriptor) => ({
+      isDefault: descriptor.options.find((option) => option.id === traits.selectValue(descriptor))
+        ?.isDefault,
+      label: traits.currentLabel(descriptor),
+    }))
+    .filter((entry) => !entry.isDefault && entry.label)
+    .map((entry) => entry.label)
+    .join(" · ");
+  return (
+    <Menu>
+      <MenuTrigger
+        render={
+          <button
+            type="button"
+            data-effort-row
+            tabIndex={-1}
+            aria-label="Workflow agents"
+            className={COLUMN_ROW}
+          />
+        }
+        onKeyDown={(event) => {
+          // Base UI opens the menu on vertical arrows; the column's row navigation owns them.
+          if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+            (
+              event as typeof event & { preventBaseUIHandler?: () => void }
+            ).preventBaseUIHandler?.();
+          }
+        }}
+      >
+        <span className="min-w-0 flex-1 truncate">Workflow</span>
+        <span className="max-w-32 truncate text-muted-foreground text-xs">
+          {summary || "Automatic"}
+        </span>
+        <ChevronRightIcon aria-hidden="true" className="size-3.5 text-muted-foreground" />
+      </MenuTrigger>
+      <MenuPopup side="right" align="start" {...composerFloatingLayerProps}>
+        <WorkflowSubmenus traits={traits} />
+      </MenuPopup>
+    </Menu>
   );
 }
 

@@ -1,4 +1,5 @@
 import {
+  getDisplayedProviderOptionDescriptors,
   getPromptControlledTraits,
   getTraitSelectChange,
 } from "@t3tools/client-runtime/model-traits";
@@ -847,7 +848,7 @@ function ThreadSettingsOptionsItem(props: {
         className="mx-4 overflow-hidden rounded-2xl bg-grouped-card"
         layout={THREAD_SETTINGS_OPTIONS_LAYOUT_TRANSITION}
       >
-        {session.displayedDescriptors.map((descriptor) => {
+        {getDisplayedProviderOptionDescriptors(session.displayedDescriptors).map((descriptor) => {
           if (descriptor.type === "select") {
             return (
               <Animated.View

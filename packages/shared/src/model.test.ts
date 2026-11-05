@@ -50,6 +50,31 @@ describe("descriptor helpers", () => {
     ).toEqual([{ id: "fastMode", value: true }]);
   });
 
+  it("maps a legacy ultracode effort onto the boolean descriptor", () => {
+    const caps = createModelCapabilities({
+      optionDescriptors: [
+        {
+          id: "effort",
+          label: "Effort",
+          type: "select",
+          options: [
+            { id: "xhigh", label: "Extra High" },
+            { id: "high", label: "High", isDefault: true },
+          ],
+        },
+        { id: "ultracode", label: "Ultracode", type: "boolean" },
+      ],
+    });
+    const selections = [{ id: "effort", value: "ultracode" }];
+    const descriptors = getProviderOptionDescriptors({ caps, selections });
+
+    expect(descriptors.map((descriptor) => descriptor.currentValue)).toEqual(["xhigh", true]);
+    expect(buildExplicitProviderOptionSelectionsFromDescriptors(descriptors, selections)).toEqual([
+      { id: "effort", value: "xhigh" },
+      { id: "ultracode", value: true },
+    ]);
+  });
+
   it("compares complete model selections independent of option ordering", () => {
     const left = createModelSelection(ProviderInstanceId.make("codex"), "gpt-5.4", [
       { id: "reasoningEffort", value: "high" },

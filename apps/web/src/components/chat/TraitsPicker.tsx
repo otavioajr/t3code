@@ -1,6 +1,8 @@
 import {
   buildTraitsTriggerDisplay,
   getDescriptorStringValue,
+  getDisplayedProviderOptionDescriptors,
+  WORKFLOW_SELECT_DESCRIPTOR_IDS,
   getTraitSelectChange,
   replaceDescriptorCurrentValue,
   selectableProviderOptionChoices,
@@ -31,6 +33,9 @@ import {
   MenuRadioGroup,
   MenuRadioItem,
   MenuSeparator as MenuDivider,
+  MenuSub,
+  MenuSubPopup,
+  MenuSubTrigger,
   MenuTrigger,
 } from "../ui/menu";
 import { useComposerDraftStore, DraftId } from "../../composerDraftStore";
@@ -131,9 +136,16 @@ function getSelectedTraits(
         caps,
         selections: modelOptions,
       });
-  const selectDescriptors = descriptors.filter(
+  const displayedDescriptors = getDisplayedProviderOptionDescriptors(descriptors);
+  const allSelectDescriptors = displayedDescriptors.filter(
     (descriptor): descriptor is Extract<ProviderOptionDescriptor, { type: "select" }> =>
       descriptor.type === "select",
+  );
+  const selectDescriptors = allSelectDescriptors.filter(
+    (descriptor) => !WORKFLOW_SELECT_DESCRIPTOR_IDS.has(descriptor.id),
+  );
+  const workflowDescriptors = allSelectDescriptors.filter((descriptor) =>
+    WORKFLOW_SELECT_DESCRIPTOR_IDS.has(descriptor.id),
   );
   const booleanDescriptors = descriptors.filter(
     (descriptor): descriptor is Extract<ProviderOptionDescriptor, { type: "boolean" }> =>
@@ -169,6 +181,7 @@ function getSelectedTraits(
     caps,
     descriptors,
     selectDescriptors,
+    workflowDescriptors,
     booleanDescriptors,
     primarySelectDescriptor,
     contextWindowDescriptor,
@@ -374,11 +387,52 @@ export function useTraitsSelection({
 export const ULTRATHINK_IN_BODY_NOTE =
   'Your prompt contains "ultrathink" in the text. Remove it to change this option.';
 
+export function WorkflowSubmenus(props: {
+  traits: Pick<
+    ReturnType<typeof useTraitsSelection>,
+    "workflowDescriptors" | "selectValue" | "currentLabel" | "changeSelect"
+  >;
+}) {
+  const { traits } = props;
+  return (
+    <>
+      {traits.workflowDescriptors.map((descriptor) => (
+        <MenuSub key={descriptor.id}>
+          <MenuSubTrigger>
+            <span className="min-w-0 flex-1 truncate">{descriptor.label}</span>
+            <span className="text-muted-foreground text-xs">{traits.currentLabel(descriptor)}</span>
+          </MenuSubTrigger>
+          <MenuSubPopup>
+            <MenuRadioGroup
+              value={traits.selectValue(descriptor)}
+              onValueChange={(value) => traits.changeSelect(descriptor, value)}
+            >
+              {descriptor.options.map((option) => (
+                <MenuRadioItem key={option.id} value={option.id} hideIndicator closeOnClick>
+                  <span className="flex w-full min-w-0 flex-col">
+                    <span className="min-w-0 truncate">{option.label}</span>
+                    {option.description ? (
+                      <span className="max-w-56 text-pretty text-muted-foreground/80 text-xs">
+                        {option.description}
+                      </span>
+                    ) : null}
+                  </span>
+                </MenuRadioItem>
+              ))}
+            </MenuRadioGroup>
+          </MenuSubPopup>
+        </MenuSub>
+      ))}
+    </>
+  );
+}
+
 const TraitsMenuContent = memo(function TraitsMenuContentImpl(props: TraitsSelectionInput) {
   const traits = useTraitsSelection(props);
   const {
     descriptors,
     selectDescriptors,
+    workflowDescriptors,
     booleanDescriptors,
     primarySelectDescriptor,
     ultrathinkInBodyText,
@@ -477,6 +531,12 @@ const TraitsMenuContent = memo(function TraitsMenuContentImpl(props: TraitsSelec
           </MenuGroup>
         </div>
       ))}
+      {workflowDescriptors.length > 0 ? (
+        <>
+          <MenuDivider />
+          <WorkflowSubmenus traits={traits} />
+        </>
+      ) : null}
     </>
   );
 });

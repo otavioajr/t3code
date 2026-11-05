@@ -12,7 +12,12 @@ import {
   subagentDetailPreview,
 } from "@t3tools/client-runtime/state/subagent-display";
 import { REASONING_EFFORT_OPTION_IDS } from "@t3tools/client-runtime/state/thread-execution";
-import { getModelSelectionStringOptionValue, resolveSelectableModel } from "@t3tools/shared/model";
+import {
+  getModelSelectionBooleanOptionValue,
+  getModelSelectionStringOptionValue,
+  normalizeLegacyClaudeUltracode,
+  resolveSelectableModel,
+} from "@t3tools/shared/model";
 import { getTraitsSpeedDisplay, TraitsSpeedIcon } from "./TraitsSpeed";
 import type { ReactNode } from "react";
 import {
@@ -72,9 +77,20 @@ export function SubagentTooltipContent(props: {
     childModel === (modelSlug ?? model) && childSelection?.instanceId === props.providerInstanceId
       ? childSelection
       : undefined;
-  const effort = REASONING_EFFORT_OPTION_IDS.map((id) =>
-    getModelSelectionStringOptionValue(matchingSelection, id),
+  const savedOptions = normalizeLegacyClaudeUltracode(matchingSelection?.options);
+  const normalizedSelection = matchingSelection && {
+    ...matchingSelection,
+    ...(savedOptions ? { options: savedOptions } : {}),
+  };
+  const reasoning = REASONING_EFFORT_OPTION_IDS.map((id) =>
+    getModelSelectionStringOptionValue(normalizedSelection, id),
   ).find(Boolean);
+  const ultracode =
+    getModelSelectionBooleanOptionValue(normalizedSelection, "ultracode") === true &&
+    providerModel?.capabilities?.optionDescriptors?.some(
+      (descriptor) => descriptor.id === "ultracode" && descriptor.type === "boolean",
+    );
+  const effort = [reasoning, ultracode ? "Ultracode" : null].filter(Boolean).join(" · ");
   const speed = provider
     ? providerModel?.capabilities?.optionDescriptors
         ?.map((descriptor) => {

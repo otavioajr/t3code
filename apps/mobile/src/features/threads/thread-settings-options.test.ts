@@ -16,7 +16,6 @@ const effortDescriptor: Extract<ProviderOptionDescriptor, { type: "select" }> = 
     { id: "medium", label: "Medium", isDefault: true },
     { id: "high", label: "High" },
     { id: "ultrathink", label: "Ultrathink" },
-    { id: "ultracode", label: "Ultracode" },
   ],
   currentValue: "high",
   promptInjectedValues: ["ultrathink"],
@@ -24,28 +23,39 @@ const effortDescriptor: Extract<ProviderOptionDescriptor, { type: "select" }> = 
 
 describe("selectableChoices", () => {
   // regression: #21406 bring model controls in line with web
-  it("leaves out prompt-injected choices and keeps workflow choices in declared order", () => {
+  it("leaves out prompt-injected choices and keeps declared order", () => {
     expect(selectableChoices(effortDescriptor).map((choice) => choice.id)).toEqual([
       "low",
       "medium",
       "high",
-      "ultracode",
     ]);
   });
 });
 
 describe("prompt-controlled reasoning", () => {
-  it("removes the prefix when choosing a regular effort and saves Ultracode as an option", () => {
-    const descriptors = [effortDescriptor];
+  it("removes the prefix when choosing a regular effort and keeps Ultracode as a separate option", () => {
+    const ultracodeDescriptor: ProviderOptionDescriptor = {
+      id: "ultracode",
+      type: "boolean",
+      label: "Ultracode",
+      currentValue: true,
+    };
+    const descriptors = [effortDescriptor, ultracodeDescriptor];
     const prompt = "Ultrathink:\nsolve it";
     expect(
       getTraitSelectChange(
         { ...getPromptControlledTraits(descriptors, prompt), descriptors },
         effortDescriptor,
         prompt,
-        "ultracode",
+        "high",
       ),
-    ).toEqual({ prompt: "solve it", modelOptions: [{ id: "effort", value: "ultracode" }] });
+    ).toEqual({
+      prompt: "solve it",
+      modelOptions: [
+        { id: "effort", value: "high" },
+        { id: "ultracode", value: true },
+      ],
+    });
   });
 
   it("keeps body-controlled Ultrathink locked", () => {

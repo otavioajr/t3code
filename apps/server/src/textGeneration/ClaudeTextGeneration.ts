@@ -17,12 +17,12 @@ import {
   getModelSelectionBooleanOptionValue,
   getModelSelectionStringOptionValue,
   getProviderOptionDescriptors,
+  normalizeLegacyClaudeUltracode,
 } from "@t3tools/shared/model";
 import {
   BUNDLED_CLAUDE_MODEL_CATALOG,
   type ClaudeModelCatalog,
   getClaudeCatalogModelCapabilities,
-  isClaudeCatalogUltracodeEffort,
   normalizeClaudeCatalogEffort,
   resolveClaudeCatalogApiModelId,
   resolveClaudeCatalogEffort,
@@ -133,8 +133,10 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
     S["DecodingServices"]
   > {
     const catalog = yield* scopedModelCatalog;
+    const legacyOptions = normalizeLegacyClaudeUltracode(modelSelection.options);
     const resolvedModelSelection = {
       ...modelSelection,
+      ...(legacyOptions ? { options: legacyOptions } : {}),
       model: resolveClaudeModelSlug(catalog, modelSelection.model),
     };
     const jsonSchemaStr = yield* encodeJsonForOperation(
@@ -159,9 +161,9 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
       resolvedEffort,
       resolvedModelSelection.model,
     );
-    const ultracode = isClaudeCatalogUltracodeEffort(resolvedEffort);
     const thinkingDescriptor = findDescriptor("thinking");
     const fastModeDescriptor = findDescriptor("fastMode");
+    const ultracodeDescriptor = findDescriptor("ultracode");
     // Only a chosen value; otherwise Claude Code's own default applies, as in chat turns.
     const thinking =
       thinkingDescriptor?.type === "boolean"
@@ -169,6 +171,8 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
         : undefined;
     const fastMode =
       fastModeDescriptor?.type === "boolean" ? fastModeDescriptor.currentValue : undefined;
+    const ultracode =
+      ultracodeDescriptor?.type === "boolean" ? ultracodeDescriptor.currentValue : undefined;
     const settings = {
       disableAllHooks: true,
       ...(typeof thinking === "boolean" ? { alwaysThinkingEnabled: thinking } : {}),

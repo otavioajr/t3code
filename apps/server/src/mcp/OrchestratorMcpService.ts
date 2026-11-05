@@ -64,7 +64,10 @@ import {
   ThreadId,
   isOrchestrationV2WorkActive,
 } from "@t3tools/contracts";
-import { getProviderOptionCurrentValue } from "@t3tools/shared/model";
+import {
+  getProviderOptionCurrentValue,
+  normalizeLegacyClaudeUltracode,
+} from "@t3tools/shared/model";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { runRanAfter } from "@t3tools/shared/orchestrationV2ThreadError";
 import { formatThreadLink } from "@t3tools/shared/threadLinks";
@@ -1418,7 +1421,10 @@ const make = Effect.gen(function* () {
       );
     }
 
-    const requestedOptions = input.target?.options;
+    const requestedOptions =
+      provider.driver === "claudeAgent"
+        ? normalizeLegacyClaudeUltracode(input.target?.options)
+        : input.target?.options;
     if (requestedOptions !== undefined) {
       const descriptors = provider.models.find((candidate) => candidate.slug === model)
         ?.capabilities?.optionDescriptors;

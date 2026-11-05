@@ -196,12 +196,44 @@ function withDescriptorCurrentValue(
   };
 }
 
+export const CLAUDE_WORKFLOW_OPTION_IDS = [
+  "workflowSize",
+  "workflowModel",
+  "workflowEffort",
+] as const;
+
+/** Older selections stored Ultracode as an effort value; it now means xhigh plus the boolean. */
+export function normalizeLegacyClaudeUltracode<
+  T extends ReadonlyArray<ProviderOptionSelection> | null | undefined,
+>(options: T): T | ReadonlyArray<ProviderOptionSelection> {
+  if (!options?.some((option) => option.id === "effort" && option.value === "ultracode")) {
+    return options;
+  }
+  const migrated = options.map((option) =>
+    option.id === "effort" ? { ...option, value: "xhigh" } : option,
+  );
+  return options.some((option) => option.id === "ultracode")
+    ? migrated
+    : [...migrated, { id: "ultracode", value: true }];
+}
+
+function withLegacyUltracodeForDescriptors(
+  descriptors: ReadonlyArray<ProviderOptionDescriptor>,
+  selections: ReadonlyArray<ProviderOptionSelection> | null | undefined,
+) {
+  return descriptors.some(
+    (descriptor) => descriptor.id === "ultracode" && descriptor.type === "boolean",
+  )
+    ? normalizeLegacyClaudeUltracode(selections)
+    : selections;
+}
+
 export function getProviderOptionDescriptors(input: {
   caps: ModelCapabilities;
   selections?: ReadonlyArray<ProviderOptionSelection> | null | undefined;
 }): ReadonlyArray<ProviderOptionDescriptor> {
-  const { caps, selections } = input;
-  const baseDescriptors = (caps.optionDescriptors ?? []).map(cloneDescriptor);
+  const baseDescriptors = (input.caps.optionDescriptors ?? []).map(cloneDescriptor);
+  const selections = withLegacyUltracodeForDescriptors(baseDescriptors, input.selections);
 
   return baseDescriptors.map((descriptor) =>
     withDescriptorCurrentValue(
@@ -312,7 +344,11 @@ export function buildExplicitProviderOptionSelectionsFromDescriptors(
   if (!selections || selections.length === 0) {
     return undefined;
   }
-  const explicitIds = new Set(selections.map((selection) => selection.id));
+  const explicitIds = new Set(
+    (withLegacyUltracodeForDescriptors(descriptors ?? [], selections) ?? []).map(
+      (selection) => selection.id,
+    ),
+  );
   const normalized = buildProviderOptionSelectionsFromDescriptors(descriptors)?.filter(
     (selection) => explicitIds.has(selection.id),
   );

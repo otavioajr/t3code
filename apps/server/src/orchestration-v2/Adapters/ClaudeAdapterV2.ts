@@ -1379,6 +1379,7 @@ function canApplyClaudeSelectionLive(
 ): boolean {
   return (
     live.settings.alwaysThinkingEnabled === next.settings.alwaysThinkingEnabled &&
+    JSON.stringify(live.settings.env ?? {}) === JSON.stringify(next.settings.env ?? {}) &&
     (next.effort !== undefined || live.effort === undefined)
   );
 }
@@ -1390,6 +1391,7 @@ function claudeLiveSelectionFlagSettings(
     ...(selection.effort === undefined ? {} : { effortLevel: selection.effort as EffortLevel }),
     fastMode: selection.settings.fastMode ?? null,
     ultracode: selection.settings.ultracode ?? null,
+    workflowSizeGuideline: selection.settings.workflowSizeGuideline ?? null,
   };
 }
 
@@ -1521,7 +1523,13 @@ export function makeClaudeQueryOptions(input: {
     selectionSettings === undefined
       ? input.sdkSettings
       : typeof input.sdkSettings === "object" && input.sdkSettings !== null
-        ? ({ ...input.sdkSettings, ...selectionSettings } as ClaudeSdkSettings)
+        ? ({
+            ...input.sdkSettings,
+            ...selectionSettings,
+            ...(selectionSettings.env === undefined && input.sdkSettings.env === undefined
+              ? {}
+              : { env: { ...input.sdkSettings.env, ...selectionSettings.env } }),
+          } as ClaudeSdkSettings)
         : selectionSettings;
   const compactQuerySettings =
     input.settings?.autoCompactWindow === undefined || input.settings.autoCompactWindow.length === 0

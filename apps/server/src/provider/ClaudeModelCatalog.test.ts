@@ -170,6 +170,59 @@ describe("Claude model catalog", () => {
     );
   });
 
+  it("splits legacy ultracode effort options into a boolean descriptor idempotently", () => {
+    const withDescriptors = (optionDescriptors: ReadonlyArray<unknown>): ModelManifestData => {
+      const base = manifest();
+      const profile = base.providers!.claudeAgent!.profiles!.synthetic!;
+      return {
+        ...base,
+        providers: {
+          claudeAgent: {
+            ...base.providers!.claudeAgent!,
+            profiles: {
+              synthetic: {
+                ...profile,
+                capabilities: { optionDescriptors } as typeof profile.capabilities,
+              },
+            },
+          },
+        },
+      };
+    };
+    const legacy = [
+      {
+        id: "effort",
+        label: "Reasoning",
+        type: "select",
+        options: [
+          { id: "high", label: "High", isDefault: true },
+          { id: "ultracode", label: "Ultracode" },
+        ],
+      },
+      { id: "fastMode", label: "Fast Mode", type: "boolean" },
+    ];
+    const read = (descriptors: ReadonlyArray<unknown>) =>
+      catalogFromManifest(withDescriptors(descriptors)).models[0]!.model.capabilities
+        ?.optionDescriptors;
+
+    const once = read(legacy) ?? [];
+    assert.deepStrictEqual(
+      once.map((descriptor) => descriptor.id),
+      ["effort", "ultracode", "workflowSize", "workflowModel", "workflowEffort", "fastMode"],
+    );
+    assert.deepStrictEqual(
+      (once[0] as { options: ReadonlyArray<{ id: string }> }).options.map((option) => option.id),
+      ["high"],
+    );
+    assert.strictEqual(once[1]?.type, "boolean");
+    assert.deepStrictEqual(read(once), once);
+    const native = [{ id: "ultracode", label: "Ultracode", type: "boolean" }, legacy[1]];
+    assert.deepStrictEqual(
+      (read(native) ?? []).map((descriptor) => descriptor.id),
+      ["ultracode", "workflowSize", "workflowModel", "workflowEffort", "fastMode"],
+    );
+  });
+
   it("appends custom models with their own descriptors and keeps bare slugs opaque", () => {
     const catalog = scopeClaudeModelCatalog(catalogFromManifest(manifest()), [
       "synthetic",

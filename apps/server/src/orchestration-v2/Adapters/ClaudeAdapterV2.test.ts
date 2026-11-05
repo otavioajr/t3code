@@ -335,7 +335,14 @@ describe("ClaudeAdapterV2 runtime query policy", () => {
     }
 
     const options = ClaudeAdapterV2.makeClaudeQueryOptions({
-      modelSelection: CLAUDE_TEST_MODEL_SELECTION,
+      modelSelection: {
+        ...CLAUDE_TEST_MODEL_SELECTION,
+        model: "claude-opus-5-5",
+        options: [
+          { id: "ultracode", value: true },
+          { id: "workflowModel", value: "sonnet" },
+        ],
+      },
       nativeThreadId: "native-tool-search",
       resume: false,
       cwd: "/workspace",
@@ -344,6 +351,7 @@ describe("ClaudeAdapterV2 runtime query policy", () => {
     });
     assert.deepEqual((options.settings as { env?: Record<string, string> }).env, {
       OTHER: "kept",
+      CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL: "sonnet",
       ENABLE_TOOL_SEARCH: "true",
     });
   });
@@ -4874,25 +4882,54 @@ describe("ClaudeAdapterV2 background wake turns", () => {
             turn(3, {
               ...normal,
               options: [
-                { id: "effort", value: "ultracode" },
+                { id: "effort", value: "medium" },
+                { id: "ultracode", value: true },
                 { id: "fastMode", value: true },
               ],
             }),
           );
           yield* settle;
-          yield* harness.runtime.startTurn(turn(4, { ...normal, model: "claude-sonnet-4-6" }));
+          yield* harness.runtime.startTurn(
+            turn(4, {
+              ...normal,
+              options: [
+                { id: "effort", value: "medium" },
+                { id: "ultracode", value: true },
+                { id: "fastMode", value: true },
+                { id: "workflowSize", value: "small" },
+              ],
+            }),
+          );
+          yield* settle;
+          yield* harness.runtime.startTurn(turn(5, { ...normal, model: "claude-sonnet-4-6" }));
           yield* settle;
           assert.deepEqual(harness.liveSelectionChanges, [
-            { effortLevel: "xhigh", fastMode: true, ultracode: true },
+            { effortLevel: "medium", fastMode: true, ultracode: true, workflowSizeGuideline: null },
+            {
+              effortLevel: "medium",
+              fastMode: true,
+              ultracode: true,
+              workflowSizeGuideline: "small",
+            },
             { model: "claude-sonnet-4-6" },
-            { effortLevel: "high", fastMode: null, ultracode: null },
+            { effortLevel: "high", fastMode: null, ultracode: null, workflowSizeGuideline: null },
           ]);
           assert.strictEqual(harness.getOpenedOptions(), originalOptions);
-          assert.lengthOf(harness.offeredMessages, 4);
+          assert.lengthOf(harness.offeredMessages, 5);
 
           for (const [ordinal, selection] of [
-            [5, CLAUDE_TEST_RESTART_MODEL_SELECTION],
-            [6, { ...normal, model: "claude-haiku-4-5-20251001" }],
+            [6, CLAUDE_TEST_RESTART_MODEL_SELECTION],
+            [7, { ...normal, model: "claude-haiku-4-5-20251001" }],
+            [
+              8,
+              {
+                ...normal,
+                options: [
+                  { id: "ultracode", value: true },
+                  { id: "workflowEffort", value: "low" },
+                ],
+              },
+            ],
           ] as const) {
             const refused = yield* harness.runtime
               .startTurn(turn(ordinal, selection))
@@ -4906,8 +4943,8 @@ describe("ClaudeAdapterV2 background wake turns", () => {
             }
           }
           assert.strictEqual(harness.getOpenedOptions(), originalOptions);
-          assert.lengthOf(harness.offeredMessages, 4);
-          assert.lengthOf(harness.liveSelectionChanges, 3);
+          assert.lengthOf(harness.offeredMessages, 5);
+          assert.lengthOf(harness.liveSelectionChanges, 4);
           assert.isTrue(yield* harness.hasPendingBackgroundWork);
         }).pipe(
           Effect.provide(
@@ -4963,9 +5000,9 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         yield* harness.runtime.startTurn(turn(3, opus));
         assert.deepEqual(harness.liveSelectionChanges, [
           { model: "claude-sonnet-4-6" },
-          { effortLevel: "high", fastMode: null, ultracode: null },
+          { effortLevel: "high", fastMode: null, ultracode: null, workflowSizeGuideline: null },
           { model: "claude-opus-5-5" },
-          { effortLevel: "medium", fastMode: false, ultracode: null },
+          { effortLevel: "medium", fastMode: false, ultracode: null, workflowSizeGuideline: null },
         ]);
       }).pipe(
         Effect.provide(
