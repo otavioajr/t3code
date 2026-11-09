@@ -1,8 +1,8 @@
 name: Build desktop (personal)
 
 # macOS and Windows installers for personal installs of this fork, published as
-# a GitHub release that installed apps update from. Run it by hand from the
-# Actions tab. Builds carry no T3 Connect config. The Windows installer embeds
+# a GitHub release that installed apps update from. Every push to daily builds
+# one; it can also run by hand from the Actions tab. Builds carry no T3 Connect config. The Windows installer embeds
 # the Linux CLI archive as its WSL runtime, the same way release-desktop.yml does.
 #
 # macOS builds are signed with a self-signed certificate (secrets
@@ -10,6 +10,8 @@ name: Build desktop (personal)
 # update only when it is signed by the same certificate as the running app.
 
 on:
+  push:
+    branches: [daily]
   workflow_dispatch:
     inputs:
       ref:
@@ -19,6 +21,11 @@ on:
 
 permissions:
   contents: read
+
+# A newer push supersedes a build still running for an older one.
+concurrency:
+  group: build-desktop-personal
+  cancel-in-progress: true
 
 env:
   # Points the update feed and the app's release links at this fork.
@@ -38,7 +45,7 @@ jobs:
       - name: Resolve version and commit
         id: version
         env:
-          BUILD_REF: ${{ inputs.ref }}
+          BUILD_REF: ${{ inputs.ref || github.sha }}
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
@@ -301,7 +308,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.version.outputs.version }}
           SHA: ${{ needs.version.outputs.sha }}
-          BUILD_REF: ${{ inputs.ref }}
+          BUILD_REF: ${{ inputs.ref || github.ref_name }}
         run: |
           set -euo pipefail
           gh release create "v${VERSION}" release-assets/* \
