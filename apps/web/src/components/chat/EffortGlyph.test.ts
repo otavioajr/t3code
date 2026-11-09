@@ -12,7 +12,7 @@ const descriptor = (ids: ReadonlyArray<string>, promptInjectedValues?: ReadonlyA
 
 describe("resolveEffortGlyph", () => {
   const claude = descriptor(
-    ["low", "medium", "high", "xhigh", "max", "ultrathink"],
+    ["low", "medium", "high", "xhigh", "max", "ultracode", "ultrathink"],
     ["ultrathink"],
   );
 
@@ -29,7 +29,8 @@ describe("resolveEffortGlyph", () => {
     expect(resolveEffortGlyph(claude, "max")?.special).toBe("Max");
   });
 
-  it("names Ultrathink instead of drawing a level", () => {
+  it("names Ultracode and Ultrathink instead of drawing a level", () => {
+    expect(resolveEffortGlyph(claude, "ultracode")?.special).toBe("Ultracode");
     expect(resolveEffortGlyph(claude, "ultrathink")?.special).toBe("Ultrathink");
   });
 
@@ -44,9 +45,11 @@ describe("resolveEffortGlyph", () => {
     });
   });
 
-  it("falls back to the word when the value is unknown or the scale has one level", () => {
+  it("falls back to the word when the value is unknown or the scale is too short or long", () => {
     expect(resolveEffortGlyph(claude, "unknown")).toBeNull();
     expect(resolveEffortGlyph(descriptor(["high"]), "high")).toBeNull();
+    const levels = Array.from({ length: 8 }, (_, index) => `level${index}`);
+    expect(resolveEffortGlyph(descriptor(levels), "level0")).toBeNull();
   });
 });
 

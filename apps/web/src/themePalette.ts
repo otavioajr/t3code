@@ -31,7 +31,7 @@ import {
 } from "./lib/contextChipAccents";
 
 import { appAtomRegistry, subscribeAtomChanges } from "./rpc/atomRegistry";
-import { primaryServerEnvironmentThemesAtom } from "./state/server";
+import { themeServerEnvironmentThemesAtom } from "./state/server";
 
 export {
   CURSOR_THEME,
@@ -324,7 +324,7 @@ export function publishedThemeDefinitions(
 // Every reconnect snapshot delivers a fresh but usually identical array; keeping the
 // previous one skips regenerating palettes and repainting the document for it.
 const publishedThemesAtom = Atom.make((get): ReadonlyArray<EnvironmentTheme> => {
-  const next = get(primaryServerEnvironmentThemesAtom);
+  const next = get(themeServerEnvironmentThemesAtom);
   const previous = Option.getOrNull(get.self<ReadonlyArray<EnvironmentTheme>>());
   return previous !== null && Equal.equals(previous, next) ? previous : next;
 }).pipe(Atom.withLabel("web-published-environment-themes"));
@@ -683,6 +683,17 @@ export function readableThemeColorOn(color: string, surface: string, minContrast
   // Return the 8-bit color the solver measured: the unrounded OKLCH can round
   // to a neighbor just under the target once it is stored and read back.
   return themeRgbToHexColor(themeOklchToRgb(solved));
+}
+
+/** A chip kind's per-theme contrast-solved lightness with `color`'s hue and chroma. */
+export function contextChipAccentWithHueOf(
+  kind: ContextChipAccentKind,
+  color: string,
+): string | null {
+  const parsed = parseThemeColor(color);
+  if (!parsed) return null;
+  const { C, h } = parsed.color;
+  return `oklch(from var(${contextChipColorVariable(kind)}) l ${formatThemeColorNumber(C, 4)} ${formatThemeColorNumber(h, 2)})`;
 }
 
 const CONTEXT_CHIP_CONTRAST = 5;
@@ -1229,13 +1240,20 @@ export function getThemePreferenceMode(theme: ThemePreference): ThemeAppearance 
 }
 
 export function themeIdFromName(name: string): string {
-  const normalized = name
-    .trim()
-    .toLowerCase()
+  const label = name.trim().toLowerCase();
+  const normalized = label
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 48);
-  return normalized || "custom-theme";
+  if (normalized || !label) return normalized || "custom-theme";
+
+  // Names without ASCII letters or digits still need independent, stable ids.
+  let hash = 2_166_136_261;
+  for (let index = 0; index < label.length; index += 1) {
+    hash ^= label.charCodeAt(index);
+    hash = Math.imul(hash, 16_777_619);
+  }
+  return `theme-${(hash >>> 0).toString(36)}`;
 }
 
 export class ThemeLibraryStorageError extends Schema.TaggedError<ThemeLibraryStorageError>()(

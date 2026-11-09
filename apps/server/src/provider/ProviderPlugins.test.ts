@@ -444,7 +444,7 @@ const spawnerFor = (cli: FakeCli) =>
   ChildProcessSpawner.make((command) =>
     Effect.gen(function* () {
       const standard = command._tag === "StandardCommand" ? command : undefined;
-      const args = standard?.args ?? [];
+      const args = standard?.args.map(String) ?? [];
       const cwd = typeof standard?.options.cwd === "string" ? standard.options.cwd : undefined;
       const gitPromptDisabled = standard?.options.env?.GIT_TERMINAL_PROMPT === "0";
       const isInstall = args[1] === "install";
@@ -708,10 +708,15 @@ const codexSpawner = (
   ChildProcessSpawner.make((command) =>
     Effect.gen(function* () {
       const standard = command._tag === "StandardCommand" ? command : undefined;
-      const args = standard?.args ?? [];
+      const args = standard?.args.map(String) ?? [];
       yield* Ref.update(recorded, (all) => [
         ...all,
-        { args, home: standard?.options.env?.CODEX_HOME },
+        {
+          args,
+          home: (({ CODEX_HOME: home }) => (home === undefined ? undefined : String(home)))(
+            standard?.options.env ?? {},
+          ),
+        },
       ]);
       const stdout =
         args[1] === "marketplace" && args[2] === "list"

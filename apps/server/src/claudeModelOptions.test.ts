@@ -3,6 +3,10 @@ import { describe, expect, it } from "@effect/vitest";
 import { ProviderInstanceId, type ModelSelection } from "@t3tools/contracts";
 
 import { compileClaudeModelSelection } from "./claudeModelOptions.ts";
+import {
+  BUNDLED_CLAUDE_MODEL_CATALOG,
+  scopeClaudeModelCatalog,
+} from "./provider/ClaudeModelCatalog.ts";
 
 const selection = (
   model: string,
@@ -30,40 +34,67 @@ describe("compileClaudeModelSelection", () => {
     });
   });
 
-  it.each([
-    [
-      "explicit boolean",
-      [
-        { id: "effort", value: "high" },
-        { id: "ultracode", value: true },
-      ],
-      "high",
-      true,
-    ],
-    ["legacy effort", [{ id: "effort", value: "ultracode" }], "xhigh", true],
-    [
-      "boolean wins over legacy",
-      [
+  it("runs Ultracode at the chosen effort and reads the old Ultracode effort as xhigh", () => {
+    expect(
+      compileClaudeModelSelection(
+        selection("claude-opus-5-5", [
+          { id: "effort", value: "high" },
+          { id: "ultracode", value: true },
+        ]),
+      ),
+    ).toMatchObject({ effort: "high", settings: { ultracode: true } });
+    expect(
+      compileClaudeModelSelection(
+        selection("claude-opus-5-5", [{ id: "effort", value: "ultracode" }]),
+      ),
+    ).toMatchObject({ effort: "xhigh", settings: { ultracode: true } });
+    const legacyTurnedOff = compileClaudeModelSelection(
+      selection("claude-opus-5-5", [
         { id: "effort", value: "ultracode" },
         { id: "ultracode", value: false },
-      ],
-      "xhigh",
-      false,
-    ],
-    [
-      "off",
-      [
-        { id: "effort", value: "high" },
-        { id: "ultracode", value: false },
-      ],
-      "high",
-      false,
-    ],
-    ["absent", [{ id: "effort", value: "high" }], "high", false],
-  ])("compiles ultracode (%s)", (_name, options, effort, on) => {
-    const compiled = compileClaudeModelSelection(selection("claude-opus-4-8", options));
-    expect(compiled.effort).toBe(effort);
-    expect(compiled.settings.ultracode).toBe(on || undefined);
+      ]),
+    );
+    expect(legacyTurnedOff.effort).toBe("xhigh");
+    expect(legacyTurnedOff.settings.ultracode).toBe(false);
+    expect(
+      compileClaudeModelSelection(selection("claude-opus-5-5", [{ id: "effort", value: "high" }]))
+        .settings,
+    ).not.toHaveProperty("ultracode");
+  });
+
+  it("keeps old Ultracode defaults and selections at Extra High on custom models", () => {
+    const customModel = (slug: string, choices: ReadonlyArray<string>) => ({
+      slug,
+      name: slug,
+      capabilities: {
+        optionDescriptors: [
+          {
+            id: "effort",
+            label: "Reasoning",
+            type: "select" as const,
+            currentValue: "ultracode",
+            options: choices.map((id) => ({ id, label: id, isDefault: id === "ultracode" })),
+          },
+        ],
+      },
+    });
+    const catalog = scopeClaudeModelCatalog(BUNDLED_CLAUDE_MODEL_CATALOG, [
+      customModel("claude-custom-tuned", ["high", "xhigh", "ultracode"]),
+      customModel("claude-custom-no-xhigh", ["high", "ultracode"]),
+    ]);
+
+    for (const model of ["claude-custom-tuned", "claude-custom-no-xhigh"]) {
+      expect(compileClaudeModelSelection(selection(model, []), catalog)).toMatchObject({
+        effort: "xhigh",
+        settings: { ultracode: true },
+      });
+      expect(
+        compileClaudeModelSelection(
+          selection(model, [{ id: "effort", value: "ultracode" }]),
+          catalog,
+        ),
+      ).toMatchObject({ effort: "xhigh", settings: { ultracode: true } });
+    }
   });
 
   it.each([
@@ -89,7 +120,7 @@ describe("compileClaudeModelSelection", () => {
         { id: "workflowSize", value: "small" },
         { id: "workflowModel", value: "sonnet" },
       ],
-      { fastMode: false },
+      { fastMode: false, ultracode: false },
     ],
     [
       "auto",

@@ -50,26 +50,27 @@ describe("descriptor helpers", () => {
     ).toEqual([{ id: "fastMode", value: true }]);
   });
 
-  it("maps a legacy ultracode effort onto the boolean descriptor", () => {
-    const caps = createModelCapabilities({
-      optionDescriptors: [
-        {
-          id: "effort",
-          label: "Effort",
-          type: "select",
-          options: [
-            { id: "xhigh", label: "Extra High" },
-            { id: "high", label: "High", isDefault: true },
-          ],
-        },
-        { id: "ultracode", label: "Ultracode", type: "boolean" },
-      ],
+  it("dispatches an old Ultracode effort as Extra High with the Ultracode toggle", () => {
+    const legacy = [{ id: "effort", value: "ultracode" }];
+    const descriptors = getProviderOptionDescriptors({
+      caps: createModelCapabilities({
+        optionDescriptors: [
+          {
+            id: "effort",
+            label: "Reasoning",
+            type: "select",
+            options: [
+              { id: "high", label: "High", isDefault: true },
+              { id: "xhigh", label: "Extra High" },
+            ],
+          },
+          { id: "ultracode", label: "Ultracode", type: "boolean" },
+        ],
+      }),
+      selections: legacy,
     });
-    const selections = [{ id: "effort", value: "ultracode" }];
-    const descriptors = getProviderOptionDescriptors({ caps, selections });
 
-    expect(descriptors.map((descriptor) => descriptor.currentValue)).toEqual(["xhigh", true]);
-    expect(buildExplicitProviderOptionSelectionsFromDescriptors(descriptors, selections)).toEqual([
+    expect(buildExplicitProviderOptionSelectionsFromDescriptors(descriptors, legacy)).toEqual([
       { id: "effort", value: "xhigh" },
       { id: "ultracode", value: true },
     ]);

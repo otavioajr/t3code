@@ -654,8 +654,7 @@ export const makeProviderPlugins = Effect.fn("makeProviderPlugins")(function* (
             ),
       describe: (install) =>
         install.installPath === undefined
-          ? // @effect-diagnostics-next-line effectSucceedWithVoid:off - This optional result requires undefined, not the wider void type.
-            Effect.succeed(undefined)
+          ? Effect.undefined
           : readManifestDescription(install.installPath),
       addMarketplace: (source) => run(["marketplace", "add", source]).pipe(Effect.asVoid),
       removeMarketplace: (name) => run(["marketplace", "remove", name]).pipe(Effect.asVoid),
@@ -714,8 +713,7 @@ export const makeProviderPlugins = Effect.fn("makeProviderPlugins")(function* (
         ),
       describe: (install) => {
         const at = install.id.lastIndexOf("@");
-        // @effect-diagnostics-next-line effectSucceedWithVoid:off - This optional result requires undefined, not the wider void type.
-        if (at <= 0 || install.version === undefined) return Effect.succeed(undefined);
+        if (at <= 0 || install.version === undefined) return Effect.undefined;
         return readManifestDescription(
           path.join(
             sharedHomePath,
@@ -823,8 +821,7 @@ export const makeProviderPlugins = Effect.fn("makeProviderPlugins")(function* (
         ),
       describe: (install) =>
         install.installPath === undefined
-          ? // @effect-diagnostics-next-line effectSucceedWithVoid:off - This optional result requires undefined, not the wider void type.
-            Effect.succeed(undefined)
+          ? Effect.undefined
           : readManifestDescription(install.installPath),
       addMarketplace: (source) => run(["marketplace", "add", source]).pipe(Effect.asVoid),
       // Grok removes a source by its URL or path, not its name.

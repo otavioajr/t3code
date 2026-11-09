@@ -4,7 +4,6 @@ import {
   getModelSelectionBooleanOptionValue,
   getModelSelectionStringOptionValue,
   getProviderOptionDescriptors,
-  normalizeLegacyClaudeUltracode,
   resolvePromptInjectedEffort,
 } from "@t3tools/shared/model";
 
@@ -20,7 +19,7 @@ import {
 export interface ClaudeCompiledSettings {
   readonly alwaysThinkingEnabled?: boolean;
   readonly fastMode?: boolean;
-  readonly ultracode?: true;
+  readonly ultracode?: boolean;
   readonly workflowSizeGuideline?: "unrestricted" | "small" | "medium" | "large";
   readonly env?: Readonly<Record<string, string>>;
 }
@@ -34,13 +33,14 @@ export interface CompiledClaudeModelSelection {
 }
 
 export function compileClaudeModelSelection(
-  rawSelection: ModelSelection,
+  selection: ModelSelection,
   catalog: ClaudeModelCatalog = BUNDLED_CLAUDE_MODEL_CATALOG,
 ): CompiledClaudeModelSelection {
-  const options = normalizeLegacyClaudeUltracode(rawSelection.options);
-  const selection = options ? { ...rawSelection, options } : rawSelection;
   const capabilities = getClaudeCatalogModelCapabilities(catalog, selection.model);
-  const descriptors = getProviderOptionDescriptors({ caps: capabilities });
+  const descriptors = getProviderOptionDescriptors({
+    caps: capabilities,
+    selections: selection.options,
+  });
   const supportsBoolean = (id: string) =>
     descriptors.some((descriptor) => descriptor.type === "boolean" && descriptor.id === id);
   const rawEffort = getModelSelectionStringOptionValue(selection, "effort");
@@ -49,15 +49,13 @@ export function compileClaudeModelSelection(
   const fastMode = supportsBoolean("fastMode")
     ? (getModelSelectionBooleanOptionValue(selection, "fastMode") ?? false)
     : undefined;
-  const ultracode = supportsBoolean("ultracode")
-    ? getModelSelectionBooleanOptionValue(selection, "ultracode")
-    : undefined;
   const thinking = supportsBoolean("thinking")
     ? getModelSelectionBooleanOptionValue(selection, "thinking")
     : undefined;
+  const ultracode = descriptors.find((descriptor) => descriptor.id === "ultracode")?.currentValue;
   const [workflowSizeId, workflowModelId, workflowEffortId] = CLAUDE_WORKFLOW_OPTION_IDS;
   const workflowValue = (id: string) => {
-    if (!ultracode) return undefined;
+    if (ultracode !== true) return undefined;
     const descriptor = descriptors.find((entry) => entry.type === "select" && entry.id === id);
     const value = getModelSelectionStringOptionValue(selection, id);
     return descriptor?.type === "select" &&
@@ -79,7 +77,7 @@ export function compileClaudeModelSelection(
   const settings: ClaudeCompiledSettings = {
     ...(typeof thinking === "boolean" ? { alwaysThinkingEnabled: thinking } : {}),
     ...(typeof fastMode === "boolean" ? { fastMode } : {}),
-    ...(ultracode ? { ultracode: true as const } : {}),
+    ...(typeof ultracode === "boolean" ? { ultracode } : {}),
     ...(workflowSize ? { workflowSizeGuideline: workflowSize } : {}),
     ...(Object.keys(env).length > 0 ? { env } : {}),
   };

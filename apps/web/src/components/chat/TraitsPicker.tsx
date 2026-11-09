@@ -6,7 +6,7 @@ import {
   getTraitSelectChange,
   replaceDescriptorCurrentValue,
   selectableProviderOptionChoices,
-  REASONING_SELECT_DESCRIPTOR_IDS,
+  isReasoningSelect,
 } from "@t3tools/client-runtime/model-traits";
 import {
   type ModelSelection,
@@ -98,10 +98,13 @@ type TraitsPersistence =
   | {
       threadRef?: ScopedThreadRef;
       draftId?: DraftId;
+      /** Runs after a change is written to the draft. */
+      onDraftModelOptionsChange?: () => void;
       onModelOptionsChange?: never;
     }
   | {
       threadRef?: undefined;
+      onDraftModelOptionsChange?: never;
       onModelOptionsChange: (nextOptions: ProviderOptions | undefined) => void;
     };
 
@@ -267,9 +270,7 @@ export function getReasoningTraitStep(input: {
     input.planModeEnabled,
   );
   if (selected.modelIsUnavailable || selected.ultrathinkInBodyText) return null;
-  const descriptor = selected.selectDescriptors.find((entry) =>
-    REASONING_SELECT_DESCRIPTOR_IDS.has(entry.id),
-  );
+  const descriptor = selected.selectDescriptors.find(isReasoningSelect);
   const choices = descriptor ? selectableProviderOptionChoices(descriptor) : [];
   if (!descriptor || choices.length < 2) return null;
   const isPrimary = descriptor.id === selected.primarySelectDescriptor?.id;
@@ -343,6 +344,7 @@ export function useTraitsSelection({
       model,
       persistSticky: true,
     });
+    persistence.onDraftModelOptionsChange?.();
   };
   const selected = getTraitsSectionVisibility({
     provider,
@@ -387,7 +389,7 @@ export function useTraitsSelection({
 export const ULTRATHINK_IN_BODY_NOTE =
   'Your prompt contains "ultrathink" in the text. Remove it to change this option.';
 
-export function WorkflowSubmenus(props: {
+function WorkflowSubmenus(props: {
   traits: Pick<
     ReturnType<typeof useTraitsSelection>,
     "workflowDescriptors" | "selectValue" | "currentLabel" | "changeSelect"
@@ -557,7 +559,6 @@ export const TraitsPicker = memo(function TraitsPicker({
     return null;
   }
   const { label: triggerLabel } = buildTraitsTriggerDisplay({
-    provider: props.provider,
     descriptors: traits.descriptors,
     primarySelectDescriptorId: traits.primarySelectDescriptor?.id ?? null,
     ultrathinkPromptControlled: traits.ultrathinkPromptControlled,
