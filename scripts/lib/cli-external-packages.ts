@@ -43,6 +43,9 @@ export function isRuntimeExternalCliDependency(id: string): boolean {
 
 /** Use neverBundle: false from alwaysBundle means no opinion and leaves transitive packages bundled. */
 export function isExternalCliDependency(id: string): boolean {
+  // Cursor loads undici from disk, but @effect/platform-node imports it as ESM, which a
+  // single-executable can only run bundled, so it is both staged and bundled.
+  if (id === "undici" || id.startsWith("undici/")) return false;
   return isRuntimeExternalCliDependency(id);
 }
 
