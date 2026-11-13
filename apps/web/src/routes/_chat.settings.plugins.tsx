@@ -23,6 +23,6 @@ function SettingsPluginsRoute() {
   );
 }
 
-export const Route = createFileRoute("/settings/plugins")({
+export const Route = createFileRoute("/_chat/settings/plugins")({
   component: SettingsPluginsRoute,
 });
