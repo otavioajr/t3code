@@ -88,6 +88,8 @@ const PlanModelPicker = memo(function PlanModelPicker(
   const draftModelState = useComposerDraftModelState(props.composerDraftTarget);
   const { selectedModel, modelOptions: composerModelOptions } = deriveEffectiveComposerModelState({
     draft: draftModelState,
+    // A thread with a plan has already run.
+    threadStarted: true,
     providers: props.providers,
     selectedProvider: props.selectedProvider,
     selectedInstanceId: props.selectedInstanceId,
