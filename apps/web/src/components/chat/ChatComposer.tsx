@@ -141,6 +141,7 @@ import { attachmentUploadBlockReason } from "../../lib/attachmentUploadState";
 import { useDictationShortcut } from "../../speech/useDictationShortcut";
 import { useDictationSubmissionShortcut } from "../../speech/useDictationSubmissionShortcut";
 import { useEnvironmentSpeechInput } from "../../speech/useEnvironmentSpeechInput";
+import { ComposerAdvisorControl } from "./ComposerAdvisorControl";
 import { ComposerSpeechButton, ComposerSpeechRecordingPill } from "./ComposerSpeechButton";
 import type { AssistantCitationSourceAnchor } from "~/lib/assistantTextSelection";
 import { shortcutLabelForCommand } from "../../keybindings";
@@ -324,6 +325,8 @@ export interface ChatComposerHandle {
     prompt?: string;
     detectTrigger?: boolean;
   }) => void;
+  /** Turns Advisor off once the message that asked for it is sent. */
+  clearAdvisorRequest: () => void;
   addTerminalContext: (selection: TerminalContextSelection) => void;
   getSendContext: () => {
     answeringPendingUserInput: boolean;
@@ -350,6 +353,8 @@ export interface ChatComposerHandle {
     planCommandAvailable: boolean;
     /** Plan mode is on, natively or as plan-first. */
     planRequested: boolean;
+    /** The user turned on Advisor for this message. */
+    consultAdvisor: boolean;
     shownPendingApprovalIds: ReadonlyArray<RuntimeRequestId>;
   };
   validateProviderInput: (providerInput: string) => boolean;
@@ -957,6 +962,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const isSendDisabled = sendDisabledReason !== null;
   // Hides the Review Plan banner for one plan; the plan and its Build actions stay as they were.
   const [dismissedPlanReviewId, setDismissedPlanReviewId] = useState<PlanId | null>(null);
+  // Advisor applies to one message in one draft, so another thread never inherits it.
+  const [advisorRequestTarget, setAdvisorRequestTarget] = useState<string | null>(null);
+  const advisorRequested = advisorRequestTarget === composerDraftTargetKey;
+  const setAdvisorRequested = useStableCallback((requested: boolean) =>
+    setAdvisorRequestTarget(requested ? composerDraftTargetKey : null),
+  );
   const selectedProviderStatus = selectedProviderEntry?.snapshot ?? null;
   const selectedProviderSkills = selectedProviderStatus
     ? resolveProviderSkillsForCwd(selectedProviderStatus, gitCwd)
@@ -3169,7 +3180,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         planFirst,
         planCommandAvailable,
         planRequested: planFirst || interactionMode === "plan",
+        consultAdvisor: advisorRequested,
       }),
+      clearAdvisorRequest: () => setAdvisorRequested(false),
       setMultipleModelSelections,
       validateProviderInput: (providerInput: string) => {
         const validationMessage = getComposerSubmissionValidationMessage({
@@ -3237,6 +3250,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       planFirst,
       planCommandAvailable,
       compactThreadContextStable,
+      advisorRequested,
     ],
   );
 
@@ -3728,6 +3742,28 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     keepFullHistory={props.keepFullHistory}
                     onToggleKeepFullHistory={props.onToggleKeepFullHistory}
                   >
+                    {activePendingProgress ? null : (
+                      <ComposerAdvisorControl
+                        environmentId={environmentId}
+                        requested={advisorRequested}
+                        disabled={isSendBusy}
+                        onRequestedChange={setAdvisorRequested}
+                        thread={
+                          routeKind === "server" && activeThread
+                            ? {
+                                id: activeThread.id,
+                                advisorModelSelection: activeThread.advisorModelSelection,
+                              }
+                            : null
+                        }
+                        settingsAdvisor={
+                          settings.advisorModelSelection ?? settings.textGenerationModelSelection
+                        }
+                        instanceEntries={providerInstanceEntries}
+                        modelOptionsByInstance={modelOptionsByInstance}
+                        getModelDisabledReason={getModelDisabledReason}
+                      />
+                    )}
                     {speechInput.available ? (
                       <>
                         <ComposerSpeechRecordingPill

@@ -1189,6 +1189,20 @@ export const SETTINGS_SEARCH_ITEMS = [
     scope: "project-defaults",
   },
   {
+    id: "advisor-model",
+    title: "Advisor model",
+    to: "/settings/providers",
+    searchTerms: ["advisor second opinion consult model review judgment"],
+    environmentOnly: true,
+  },
+  {
+    id: "advisor-auto-consult",
+    title: "Consult automatically",
+    to: "/settings/providers",
+    searchTerms: ["advisor second opinion consult automatic auto"],
+    environmentOnly: true,
+  },
+  {
     id: "review-guide-model",
     title: "Review guide model",
     to: "/settings/source-control",

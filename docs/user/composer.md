@@ -312,6 +312,20 @@ subagent on the model chosen in the panel, then reviews the result. **Review Pla
 composer offers the same Build action. Use `/default` to
 leave plan mode.
 
+## Advisor
+
+The advisor is a second model the agent asks for an opinion. It sees only what the agent sends,
+so it is useful for a design decision or a bug the agent keeps failing at. Pick its model in
+**Settings → Providers → Advisor**; when off, it uses the text generation model.
+
+- To use it on one message, turn on the lightbulb next to the microphone before sending. On
+  mobile, use **Consult on next message** in the thread settings sheet. It turns off after the
+  message is sent, and the message shows **Advisor**.
+- While the lightbulb is on, the model chip beside it sets this thread's advisor. Pick the
+  Settings advisor again to follow Settings.
+- **Consult automatically** lets the agent decide when to ask on every message. The agent may
+  still skip it, and each consultation is an extra request to the advisor's provider.
+
 ## Goals
 
 With Codex and Claude, send `/goal` followed by what "done" means, for example

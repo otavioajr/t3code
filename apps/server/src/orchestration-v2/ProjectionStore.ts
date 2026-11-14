@@ -1621,6 +1621,9 @@ export function threadShellFromProjection(
     title: projection.thread.title,
     providerInstanceId: projection.thread.providerInstanceId,
     modelSelection: projection.thread.modelSelection,
+    ...(projection.thread.advisorModelSelection === undefined
+      ? {}
+      : { advisorModelSelection: projection.thread.advisorModelSelection }),
     runtimeMode: projection.thread.runtimeMode,
     interactionMode: projection.thread.interactionMode,
     branch: projection.thread.branch,
@@ -1902,6 +1905,9 @@ function shellFromState(input: {
     title: input.state.thread.title,
     providerInstanceId: input.state.thread.providerInstanceId,
     modelSelection: input.state.thread.modelSelection,
+    ...(input.state.thread.advisorModelSelection === undefined
+      ? {}
+      : { advisorModelSelection: input.state.thread.advisorModelSelection }),
     runtimeMode: input.state.thread.runtimeMode,
     interactionMode: input.state.thread.interactionMode,
     branch: input.state.thread.branch,

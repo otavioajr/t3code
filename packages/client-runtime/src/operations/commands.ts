@@ -145,6 +145,10 @@ export interface SetThreadInteractionModeInput extends ThreadCommandInput {
   readonly interactionMode: ProviderInteractionMode;
 }
 
+export interface SetThreadAdvisorSelectionInput extends ThreadCommandInput {
+  readonly advisorModelSelection: ModelSelection | null;
+}
+
 interface StartThreadBootstrap {
   readonly createThread?: {
     readonly projectId: ProjectId;
@@ -665,6 +669,17 @@ export const setThreadInteractionMode = Effect.fn("EnvironmentCommands.setThread
       commandId: yield* allocateCommandId(input),
       threadId: input.threadId,
       interactionMode: input.interactionMode,
+    });
+  },
+);
+
+export const setThreadAdvisorSelection = Effect.fn("EnvironmentCommands.setThreadAdvisorSelection")(
+  function* (input: SetThreadAdvisorSelectionInput) {
+    return yield* dispatch({
+      type: "thread.advisor-selection.set",
+      commandId: yield* allocateCommandId(input),
+      threadId: input.threadId,
+      advisorModelSelection: input.advisorModelSelection,
     });
   },
 );

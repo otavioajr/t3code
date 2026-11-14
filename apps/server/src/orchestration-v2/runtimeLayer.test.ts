@@ -2617,6 +2617,26 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
         threadId,
         modelSelection: { ...modelSelection, model: "gpt-5.5" },
       });
+      const advisorOf = function* () {
+        return (yield* orchestrator.getShellSnapshot()).threads.find(
+          (thread) => thread.id === threadId,
+        )?.advisorModelSelection;
+      };
+      const advisor = { ...modelSelection, model: "gpt-5.5-pro" };
+      yield* orchestrator.dispatch({
+        type: "thread.advisor-selection.set",
+        commandId: CommandId.make("runtime-layer-lifecycle-advisor"),
+        threadId,
+        advisorModelSelection: advisor,
+      });
+      assert.deepEqual(yield* advisorOf(), advisor);
+      yield* orchestrator.dispatch({
+        type: "thread.advisor-selection.set",
+        commandId: CommandId.make("runtime-layer-lifecycle-advisor-clear"),
+        threadId,
+        advisorModelSelection: null,
+      });
+      assert.equal(yield* advisorOf(), undefined);
       yield* orchestrator.dispatch({
         type: "thread.active.reorder",
         commandId: CommandId.make("runtime-layer-lifecycle-active-order"),

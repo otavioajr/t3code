@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { EnvironmentId, ProviderInstanceId } from "@t3tools/contracts";
 
+import { AdvisorSettings } from "../components/settings/AdvisorSettings";
 import { SubagentSettings } from "../components/settings/SubagentSettings";
 import { ProviderSettingsPanel } from "../components/settings/ProviderSettingsPanel";
 import { useSettingsScope } from "../components/settings/SettingsScopeContext";
@@ -32,6 +33,7 @@ function SettingsProvidersRoute() {
         scoped
       />
       <SubagentSettings />
+      <AdvisorSettings />
     </>
   );
 }

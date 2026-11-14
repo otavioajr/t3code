@@ -107,6 +107,17 @@ export interface TranscriptionPostProcessingResult {
   transcription: string;
 }
 
+export interface AdviceGenerationInput {
+  cwd: string;
+  question: string;
+  context?: string | undefined;
+  modelSelection: ModelSelection;
+}
+
+export interface AdviceGenerationResult {
+  advice: string;
+}
+
 export interface ProviderTextGeneration {
   readonly generateTranscriptionPostProcessing: (
     input: TranscriptionPostProcessingInput,
@@ -131,4 +142,8 @@ export interface ProviderTextGeneration {
   readonly generateReviewGuide: (
     input: ReviewGuideGenerationInput,
   ) => Effect.Effect<ReviewGuideGenerationResult, TextGenerationError>;
+
+  readonly generateAdvice: (
+    input: AdviceGenerationInput,
+  ) => Effect.Effect<AdviceGenerationResult, TextGenerationError>;
 }

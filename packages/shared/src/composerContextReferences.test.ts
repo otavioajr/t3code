@@ -13,6 +13,8 @@ import {
   isImageReferencesOnly,
   parseComposerContextHref,
   projectComposerContextForProvider,
+  ADVISOR_AUTO_CONSULT_NOTE,
+  CONSULT_ADVISOR_REQUEST,
   restoreAttachmentOnlyBootstrapPrompt,
   stripAttachmentOnlyBootstrapPrompt,
   threadContextRecord,
@@ -194,6 +196,26 @@ describe("provider projection", () => {
     expect(projected).toContain("  selector: #pay");
     expect(projected).toContain("  source: Pay.tsx:3");
     expect(projected).toContain("- font-size: 12px → 20px");
+  });
+
+  it("asks for the advisor only on a requested or auto-consult turn, never on a slash command", () => {
+    const project = (
+      text: string,
+      advisor: { consultAdvisor?: boolean; advisorAutoConsult?: boolean },
+    ) => projectComposerContextForProvider({ text, records: [], ...advisor });
+    expect(project("Fix it", {})).toBe("Fix it");
+    expect(project("Fix it", { consultAdvisor: true })).toBe(
+      `Fix it\n\n${CONSULT_ADVISOR_REQUEST}`,
+    );
+    expect(project("Fix it", { advisorAutoConsult: true })).toBe(
+      `Fix it\n\n${ADVISOR_AUTO_CONSULT_NOTE}`,
+    );
+    expect(project("Fix it", { consultAdvisor: true, advisorAutoConsult: true })).toBe(
+      `Fix it\n\n${CONSULT_ADVISOR_REQUEST}`,
+    );
+    expect(project("/compact", { consultAdvisor: true, advisorAutoConsult: true })).toBe(
+      "/compact",
+    );
   });
 
   it("uses the payload kind when a reference disagrees with its record", () => {

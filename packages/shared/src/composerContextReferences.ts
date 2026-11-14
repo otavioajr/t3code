@@ -372,7 +372,33 @@ function formatEnvelopeEntry(
   return `${open}>\n${escapeComposerContextPayloadText(body)}\n</${CONTEXT_ENTRY_TAG}>`;
 }
 
+/** Appended to the provider text when the user sends a message with the advisor toggle on. */
+export const CONSULT_ADVISOR_REQUEST =
+  "The user asked for the advisor on this message: gather what you need, then call the T3 `consult_advisor` tool before you answer or edit files, and weigh its advice.";
+
+/** Appended to every turn while Settings → Advisor → Consult automatically is on. */
+export const ADVISOR_AUTO_CONSULT_NOTE =
+  "T3 advisor is on: call the T3 `consult_advisor` tool before a significant design decision, after two failed attempts at the same problem, and before you report substantial work as done. Skip it for simple tasks.";
+
 export function projectComposerContextForProvider(input: {
+  text: string;
+  records: ReadonlyArray<ComposerContextRecord>;
+  consultAdvisor?: boolean | undefined;
+  advisorAutoConsult?: boolean | undefined;
+}): string {
+  const text = projectComposerContextRecords(input);
+  // Native slash commands must stay verbatim.
+  const advisorNote = input.text.trimStart().startsWith("/")
+    ? undefined
+    : input.consultAdvisor === true
+      ? CONSULT_ADVISOR_REQUEST
+      : input.advisorAutoConsult === true
+        ? ADVISOR_AUTO_CONSULT_NOTE
+        : undefined;
+  return advisorNote === undefined ? text : `${text}\n\n${advisorNote}`;
+}
+
+function projectComposerContextRecords(input: {
   text: string;
   records: ReadonlyArray<ComposerContextRecord>;
 }): string {

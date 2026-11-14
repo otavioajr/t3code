@@ -26,6 +26,7 @@ import {
   orchestrationV2WorktreePending,
   type EnvironmentId,
   type ModelSelection,
+  type OrchestrationMessageContext,
   type RuntimeMode,
   type ScopedThreadRef,
   type ThreadId,
@@ -73,10 +74,12 @@ import {
   clearComposerDraftContent,
   composerContextImportsAtom,
   getComposerDraftSnapshot,
+  isAdvisorRequested,
   isFreshSessionPending,
   mergeComposerDraftContent,
   removeComposerDraftAttachment,
   scheduleUnusedComposerAttachmentCleanup,
+  setAdvisorRequested,
   setComposerDraftText,
   setFreshSessionPending,
   useComposerDraft,
@@ -720,6 +723,10 @@ export function useThreadComposerState(input: {
 
     // A redirect belongs to the approval it answers; the armed session waits for the next message.
     const freshContext = beforeDispatch === undefined && isFreshSessionPending(threadKey);
+    const consultAdvisor = isAdvisorRequested(threadKey);
+    const sentContext: OrchestrationMessageContext | undefined = consultAdvisor
+      ? { version: 1, records: draft.context?.records ?? [], consultAdvisor }
+      : draft.context;
     const metadata = makeQueuedMessageMetadata();
     // A fresh session drops the context a compaction would summarize.
     const compactBeforeSend =
@@ -752,7 +759,7 @@ export function useThreadComposerState(input: {
       commandId: CommandId.make(metadata.commandId),
       text,
       attachments,
-      context: draft.context,
+      context: sentContext,
       modelSelection,
       runtimeMode: draft.runtimeMode ?? thread.runtimeMode,
       interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
@@ -766,6 +773,7 @@ export function useThreadComposerState(input: {
     });
     clearComposerDraftContent(threadKey, { deferAttachmentCleanup: true });
     if (freshContext) setFreshSessionPending(threadKey, false);
+    if (consultAdvisor) setAdvisorRequested(threadKey, false);
     enqueuePromise.then(
       () => scheduleUnusedComposerAttachmentCleanup(attachments),
       (error: unknown) => {
@@ -777,6 +785,7 @@ export function useThreadComposerState(input: {
         });
         appendComposerDraftAttachments(threadKey, attachments, { allowOverflow: true });
         if (freshContext) setFreshSessionPending(threadKey, true);
+        if (consultAdvisor) setAdvisorRequested(threadKey, true);
         setThreadComposerError(
           threadKey,
           error instanceof Error ? error.message : "Failed to save the queued message.",

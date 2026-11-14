@@ -161,6 +161,7 @@ export const layer: Layer.Layer<
     const providerSessions = yield* ProviderSessionManager.ProviderSessionManagerV2;
     const runExecution = yield* RunExecutionService.RunExecutionServiceV2;
     const runtimePolicy = yield* RuntimePolicy.RuntimePolicyV2;
+    const serverSettings = yield* ServerSettings.ServerSettingsService;
     const isManagedWorktreePath = yield* makeIsManagedWorktreePath;
 
     const resolveRecreateBase = Effect.fn("ProviderTurnStartService.resolveRecreateBase")(
@@ -837,9 +838,15 @@ export const layer: Layer.Layer<
       });
       let effectiveHandoffs = handoffs;
       let resumeFellBack = false;
+      const advisorAutoConsult = yield* serverSettings.getSettings.pipe(
+        Effect.map((settings) => settings.advisorAutoConsult),
+        Effect.orElseSucceed(() => false),
+      );
       const userText = projectComposerContextForProvider({
         text: message.text,
         records: message.context?.records ?? [],
+        consultAdvisor: message.context?.consultAdvisor,
+        advisorAutoConsult,
       });
       // Codex and Claude parse /goal from the prompt, so it goes verbatim and history waits a turn.
       const goalDriver = session.driver === "codex" || session.driver === "claudeAgent";

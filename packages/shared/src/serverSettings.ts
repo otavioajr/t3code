@@ -642,6 +642,9 @@ export function applyServerSettingsPatch(
     ...(patch.sourceControlWriterModelSelection !== undefined
       ? { sourceControlWriterModelSelection: patch.sourceControlWriterModelSelection }
       : {}),
+    ...(patch.advisorModelSelection !== undefined
+      ? { advisorModelSelection: patch.advisorModelSelection }
+      : {}),
     ...(patch.explorerSubagentModelSelection !== undefined
       ? { explorerSubagentModelSelection: patch.explorerSubagentModelSelection }
       : {}),

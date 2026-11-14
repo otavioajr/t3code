@@ -332,6 +332,7 @@ export function buildMessageContext(input: {
   threadContexts?: ReadonlyArray<ThreadContextRecord>;
   environmentContexts?: ReadonlyArray<EnvironmentContextRecord>;
   attachments?: ReadonlyArray<BoundComposerAttachment>;
+  consultAdvisor?: boolean;
 }): OrchestrationMessageContext | undefined {
   const screenshotAttachmentIds = new Set(
     (input.attachments ?? []).flatMap(({ attachment }) =>
@@ -350,7 +351,9 @@ export function buildMessageContext(input: {
     ),
     ...(input.attachments ?? []).map(attachmentContextRecord),
   ];
-  return records.length === 0 ? undefined : { version: 1, records };
+  const consultAdvisor = input.consultAdvisor === true;
+  if (records.length === 0 && !consultAdvisor) return undefined;
+  return { version: 1, records, ...(consultAdvisor ? { consultAdvisor } : {}) };
 }
 
 export function asKnownContextRecord(

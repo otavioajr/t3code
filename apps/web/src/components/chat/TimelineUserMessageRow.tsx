@@ -934,6 +934,13 @@ function UserTextMessageRow({ row }: { row: Extract<TimelineRow, { kind: "messag
           ) : null}
         </div>
       ) : null}
+      {row.message.context?.consultAdvisor === true ? (
+        <div className="me-1 flex justify-end">
+          <Badge variant="secondary" title="The agent was asked to consult the advisor">
+            Advisor
+          </Badge>
+        </div>
+      ) : null}
       {mediaAboveText ? (
         <div className="flex max-w-[80%] justify-end">
           {/* The heading leads the media so screen readers reach it before the images. */}

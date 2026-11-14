@@ -7,6 +7,7 @@ import { extractJsonObject } from "@t3tools/shared/schemaJson";
 
 import type { ProviderTextGeneration } from "./textGeneration.ts";
 import {
+  buildAdvicePrompt,
   buildBranchNamePrompt,
   buildCommitMessagePrompt,
   buildPrContentPrompt,
@@ -180,6 +181,18 @@ export function fromRunner(name: string, run: Runner): ProviderTextGeneration {
     });
   });
 
+  const generateAdvice: ProviderTextGeneration["generateAdvice"] = Effect.fn(
+    `${name}.generateAdvice`,
+  )(function* (input) {
+    const generated = yield* run({
+      operation: "generateAdvice",
+      cwd: input.cwd,
+      modelSelection: input.modelSelection,
+      ...buildAdvicePrompt({ question: input.question, context: input.context }),
+    });
+    return { advice: generated.advice.trim() };
+  });
+
   return {
     generateCommitMessage,
     generatePrContent,
@@ -187,5 +200,6 @@ export function fromRunner(name: string, run: Runner): ProviderTextGeneration {
     generateThreadTitle,
     generateReviewGuide,
     generateTranscriptionPostProcessing,
+    generateAdvice,
   } satisfies ProviderTextGeneration;
 }

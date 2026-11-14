@@ -55,7 +55,7 @@ function formatValue(key: keyof ServerSettings, value: unknown): string {
         ? "Never"
         : key === "defaultModelSelection"
           ? "Automatic"
-          : key === "sourceControlWriterModelSelection"
+          : key === "advisorModelSelection" || key === "sourceControlWriterModelSelection"
             ? "Text generation model"
             : key === "reviewGuideModelSelection"
               ? "Source control writer model"

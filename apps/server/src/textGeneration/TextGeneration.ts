@@ -25,6 +25,8 @@ import * as TextGenerators from "./TextGenerators.ts";
 import * as TextGenerationOperations from "@t3tools/provider-core/server/textGenerationOperations";
 
 export type {
+  AdviceGenerationInput,
+  AdviceGenerationResult,
   BranchNameGenerationInput,
   BranchNameGenerationResult,
   CommitMessageGenerationInput,
@@ -49,7 +51,8 @@ type TextGenerationOp =
   | "generateBranchName"
   | "generateThreadTitle"
   | "generateReviewGuide"
-  | "generateTranscriptionPostProcessing";
+  | "generateTranscriptionPostProcessing"
+  | "generateAdvice";
 
 const resolveInstance = (
   registry: ProviderInstanceRegistry.ProviderInstanceRegistry["Service"],
@@ -182,6 +185,11 @@ export const make = Effect.gen(function* () {
         input.modelSelection,
         (service, modelSelection) =>
           service.generateTranscriptionPostProcessing({ ...input, modelSelection }),
+      );
+    }),
+    generateAdvice: Effect.fn("TextGeneration.generateAdvice")(function (input) {
+      return generate("generateAdvice", input.modelSelection, (service, modelSelection) =>
+        service.generateAdvice({ ...input, modelSelection }),
       );
     }),
     generateThreadTitle: Effect.fn("TextGeneration.generateThreadTitle")(function (input) {

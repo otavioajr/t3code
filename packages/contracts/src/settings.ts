@@ -1530,6 +1530,11 @@ export const ServerSettings = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
   /** Null inherits the calling thread’s model for exploration or execution. */
+  // Null follows textGenerationModelSelection; threads may pin their own advisor.
+  advisorModelSelection: Schema.NullOr(ModelSelection).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  advisorAutoConsult: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   explorerSubagentModelSelection: Schema.NullOr(ModelSelection).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
@@ -1917,6 +1922,8 @@ export const ServerSettingsPatch = Schema.Struct({
   sourceControlWriterModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
   reviewGuidesEnabled: Schema.optionalKey(Schema.Boolean),
   reviewGuideModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
+  advisorModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
+  advisorAutoConsult: Schema.optionalKey(Schema.Boolean),
   explorerSubagentModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
   executionSubagentModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
   reviewGuideInstructions: Schema.optionalKey(TrimmedString),

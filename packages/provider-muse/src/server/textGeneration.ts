@@ -27,6 +27,7 @@ import {
   TranscriptionPostProcessingOutput,
 } from "@t3tools/provider-core/server/textGenerationOperations";
 import {
+  buildAdvicePrompt,
   buildBranchNamePrompt,
   buildCommitMessagePrompt,
   buildPrContentPrompt,
@@ -361,6 +362,16 @@ export const makeMuseTextGeneration = Effect.fn("makeMuseTextGeneration")(functi
     });
   const generateReviewGuide: ProviderTextGeneration["generateReviewGuide"] = () =>
     Effect.fail(investigationUnsupported("generateReviewGuide", "Muse Code"));
+  const generateAdvice: ProviderTextGeneration["generateAdvice"] = Effect.fn(
+    "MuseTextGeneration.generateAdvice",
+  )(function* (input) {
+    const generated = yield* runMuseJson({
+      operation: "generateAdvice",
+      ...buildAdvicePrompt(input),
+      modelSelection: input.modelSelection,
+    });
+    return { advice: generated.advice.trim() };
+  });
   return {
     generateCommitMessage,
     generatePrContent,
@@ -368,5 +379,6 @@ export const makeMuseTextGeneration = Effect.fn("makeMuseTextGeneration")(functi
     generateThreadTitle,
     generateReviewGuide,
     generateTranscriptionPostProcessing,
+    generateAdvice,
   } satisfies ProviderTextGeneration;
 });

@@ -83,6 +83,7 @@ import { scopedThreadKey } from "../../lib/scopedEntities";
 import { useThreadReportedModelSelection } from "../../state/entities";
 import {
   setComposerDraftText,
+  setAdvisorRequested,
   updateComposerDraftSettings,
   useComposerDraft,
   useComposerDraftSettings,
@@ -272,6 +273,11 @@ type ThreadSettingsSessionProps = {
   readonly onUpdateOptionSelections: (selections: ReadonlyArray<ProviderOptionSelection>) => void;
   readonly runtimeMode: RuntimeMode;
   readonly onUpdateRuntimeMode: (mode: RuntimeMode) => void;
+  /** Existing threads only: asks the agent to consult the advisor on the next message. */
+  readonly advisor?: {
+    readonly requested: boolean;
+    readonly onRequestedChange: (requested: boolean) => void;
+  };
 };
 
 /** The composer draft the sheet edits: the thread's own, or a queued message being edited. */
@@ -293,6 +299,7 @@ type ThreadSettingsSessionValue = {
   readonly manageHidden: boolean;
   readonly setManageHidden: (value: boolean) => void;
   readonly runtimeMode: RuntimeMode;
+  readonly advisor: ThreadSettingsSessionProps["advisor"];
   readonly runtimeModeChoices: ReadonlyArray<RuntimeModeChoice>;
   readonly onUpdateRuntimeMode: (mode: RuntimeMode) => void;
   readonly displayedDescriptors: ReadonlyArray<ProviderOptionDescriptor>;
@@ -602,6 +609,7 @@ function ThreadSettingsSessionProvider(
     toggleHidden,
     pendingHiddenKeys,
     runtimeMode: compatibleRuntimeMode,
+    advisor: props.advisor,
     runtimeModeChoices,
     onUpdateRuntimeMode: props.onUpdateRuntimeMode,
     displayedDescriptors,
@@ -891,6 +899,22 @@ function ThreadSettingsOptionsItem(props: {
           />
         </Animated.View>
       </Animated.View>
+
+      {session.advisor ? (
+        <>
+          <Text className="px-5 pb-2 pt-7 text-sm font-t3-medium text-foreground-muted">
+            Advisor
+          </Text>
+          <View className="mx-4 overflow-hidden rounded-2xl bg-grouped-card">
+            <SwitchRow
+              label="Consult on next message"
+              value={session.advisor.requested}
+              onValueChange={session.advisor.onRequestedChange}
+              isLast
+            />
+          </View>
+        </>
+      ) : null}
 
       <Text className="px-5 pb-2 pt-7 text-sm font-t3-medium text-foreground-muted">Catalog</Text>
       <View className="mx-4 overflow-hidden rounded-2xl bg-grouped-card">
@@ -1364,6 +1388,10 @@ export function ExistingThreadSettingsRouteScreen({
       }}
       runtimeMode={draftSettings.runtimeMode ?? selectedThread.runtimeMode}
       onUpdateRuntimeMode={(runtimeMode) => updateComposerDraftSettings(threadKey, { runtimeMode })}
+      advisor={{
+        requested: draftSettings.consultAdvisor === true,
+        onRequestedChange: (requested) => setAdvisorRequested(threadKey, requested),
+      }}
       onClose={() => navigation.goBack()}
     />
   );

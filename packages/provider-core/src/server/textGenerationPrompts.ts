@@ -486,3 +486,30 @@ export function buildThreadTitlePrompt(input: ThreadTitlePromptInput) {
 
   return { prompt, outputSchema };
 }
+
+export const ADVICE_QUESTION_MAX_CHARS = 8_000;
+export const ADVICE_CONTEXT_MAX_CHARS = 60_000;
+
+export interface AdvicePromptInput {
+  question: string;
+  context?: string | undefined;
+}
+
+export function buildAdvicePrompt(input: AdvicePromptInput) {
+  const context = input.context?.trim();
+  const prompt = [
+    "You are an advisor to a coding agent working in a user's repository.",
+    "The agent paused to ask for your judgment. You cannot see the repository or run tools; rely only on what the agent sent.",
+    "Give direct, specific advice: the approach you recommend, the risks or mistakes to avoid, and what the agent should check before continuing. If the information is not enough to decide, say what is missing.",
+    "Be concise. Do not restate the question.",
+    "",
+    "Return a JSON object with key: advice (markdown string).",
+    "",
+    "Question:",
+    limitSection(input.question.trim(), ADVICE_QUESTION_MAX_CHARS),
+    ...(context
+      ? ["", "Context from the agent:", limitSection(context, ADVICE_CONTEXT_MAX_CHARS)]
+      : []),
+  ].join("\n");
+  return { prompt, outputSchema: Schema.Struct({ advice: Schema.String }) };
+}

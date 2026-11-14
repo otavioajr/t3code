@@ -77,6 +77,8 @@ import {
   DeviceStandardToolkit,
 } from "./toolkits/device/tools.ts";
 import * as HtmlHandlers from "./toolkits/html/handlers.ts";
+import * as AdvisorHandlers from "./toolkits/advisor/handlers.ts";
+import { AdvisorToolkit } from "./toolkits/advisor/tools.ts";
 import * as PlanHandlers from "./toolkits/plan/handlers.ts";
 import { PlanToolkit } from "./toolkits/plan/tools.ts";
 import { HtmlPreviewTool, HtmlPreviewToolkit, HtmlRenderToolkit } from "./toolkits/html/tools.ts";
@@ -1147,6 +1149,8 @@ export const layerHtmlToolkit = Layer.mergeAll(
 
 const layerPlanToolkit = toolkitRegistration(PlanToolkit, PlanHandlers.layer);
 
+const layerAdvisorToolkit = toolkitRegistration(AdvisorToolkit, AdvisorHandlers.layer);
+
 const layerPreviewStandardToolkitRegistration = toolkitRegistration(
   PreviewStandardToolkit,
   PreviewHandlers.layerStandard,
@@ -1254,6 +1258,7 @@ export const layerTools = Layer.mergeAll(
   layerDeviceToolkit,
   layerHtmlToolkit,
   layerPlanToolkit,
+  layerAdvisorToolkit,
 );
 
 export const layer = layerMcpTransport(layerTools);

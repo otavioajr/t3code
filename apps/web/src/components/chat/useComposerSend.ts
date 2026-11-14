@@ -599,6 +599,7 @@ export function useComposerSend(input: ComposerSendInput) {
       planFirst: sendPlanFirst,
       planCommandAvailable: sendPlanCommandAvailable,
       planRequested: sendPlanRequested,
+      consultAdvisor: sendConsultAdvisor,
     } = sendCtx;
     const { images: composerImages, previewAnnotations: composerPreviewAnnotations } =
       mergeDirectPreviewAnnotation({
@@ -920,6 +921,7 @@ export function useComposerSend(input: ComposerSendInput) {
           attachment,
           attachmentId: attachmentIds[index] ?? attachment.id,
         })),
+        consultAdvisor: sendConsultAdvisor,
       });
     const outgoingMessageContext = buildOutgoingMessageContext(
       composerAttachmentsSnapshot.map((attachment) => attachment.id),
@@ -1212,6 +1214,7 @@ export function useComposerSend(input: ComposerSendInput) {
         buildOutgoingMessageContext,
         isCurrentSend: () => composerSendGenerationRef.current === sendGeneration,
       });
+      composerRef.current?.clearAdvisorRequest();
       return;
     }
     const optimisticAttachments = optimisticMessageAttachments(composerAttachmentsSnapshot);
@@ -1267,6 +1270,7 @@ export function useComposerSend(input: ComposerSendInput) {
     promptRef.current = "";
     clearComposerDraftContent(composerDraftTarget);
     composerRef.current?.resetCursorState();
+    composerRef.current?.clearAdvisorRequest();
 
     const title = deriveThreadTitleSeed({
       text: messageTextForSend,

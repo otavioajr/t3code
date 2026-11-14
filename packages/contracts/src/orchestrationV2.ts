@@ -448,6 +448,8 @@ export const OrchestrationV2AppThread = Schema.Struct({
   title: TrimmedNonEmptyString,
   providerInstanceId: ProviderInstanceId,
   modelSelection: ModelSelection,
+  /** Pins this thread's advisor; absent follows the advisor in Settings. */
+  advisorModelSelection: Schema.optional(ModelSelection),
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode,
   branch: Schema.NullOr(TrimmedNonEmptyString),
@@ -2100,6 +2102,8 @@ export const OrchestrationV2ThreadShell = Schema.Struct({
   title: Schema.String,
   providerInstanceId: ProviderInstanceId,
   modelSelection: ModelSelection,
+  /** Pins this thread's advisor; absent follows the advisor in Settings. */
+  advisorModelSelection: Schema.optional(ModelSelection),
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode,
   branch: Schema.NullOr(TrimmedNonEmptyString),
@@ -3168,6 +3172,13 @@ export const OrchestrationV2Command = Schema.Union([
     commandId: CommandId,
     threadId: ThreadId,
     modelSelection: ModelSelection,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("thread.advisor-selection.set"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    /** Null returns the thread to the advisor in Settings. */
+    advisorModelSelection: Schema.NullOr(ModelSelection),
   }),
   Schema.Struct({
     type: Schema.Literal("provider-session.detach"),
