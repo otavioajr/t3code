@@ -207,8 +207,11 @@ export const make = Effect.gen(function* () {
       );
     }),
     generateAdvice: Effect.fn("TextGeneration.generateAdvice")(function (input) {
-      return generate("generateAdvice", input.modelSelection, (service, modelSelection) =>
-        service.generateAdvice({ ...input, modelSelection }),
+      return generate(
+        "generateAdvice",
+        input.modelSelection,
+        input.projectId,
+        (service, modelSelection) => service.generateAdvice({ ...input, modelSelection }),
       );
     }),
     generateThreadTitle: Effect.fn("TextGeneration.generateThreadTitle")(function (input) {

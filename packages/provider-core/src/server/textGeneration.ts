@@ -116,6 +116,7 @@ export interface TranscriptionPostProcessingResult {
 
 export interface AdviceGenerationInput {
   cwd: string;
+  projectId?: ProjectId | null | undefined;
   question: string;
   context?: string | undefined;
   modelSelection: ModelSelection;

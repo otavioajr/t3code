@@ -40,6 +40,7 @@ const handlers = {
       const { advice } = yield* textGeneration
         .generateAdvice({
           cwd,
+          projectId: caller?.projectId ?? null,
           question: input.question,
           context: input.context,
           modelSelection,
