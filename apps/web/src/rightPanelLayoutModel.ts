@@ -1,7 +1,8 @@
 /**
  * The right panel's arrangement: columns of stacked tab groups, plus groups minimized to cards.
  * Surfaces themselves live in the thread's registry (`ThreadRightPanelState.surfaces`); groups only
- * hold their ids. Sizes are flex weights, so removing a sibling needs no renormalization.
+ * hold their ids. Sizes are relative weights, normalized when rendered, so removing a sibling
+ * needs no renormalization.
  */
 export interface RightPanelGroup {
   readonly id: string;

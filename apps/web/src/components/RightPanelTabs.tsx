@@ -1662,7 +1662,9 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             <Fragment key={column.id}>
               <div
                 className={cn("flex min-h-0 min-w-0 flex-col", columnHidden && "hidden")}
-                style={{ flex: `${maximizedGroupId === null ? column.size : 1} 1 0px` }}
+                style={{
+                  flex: `${maximizedGroupId === null ? flexShare(column.size, columns) : 1} 1 0px`,
+                }}
                 data-right-panel-column={column.id}
               >
                 {column.groups.map((group, groupIndex) => {
@@ -1673,7 +1675,9 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                     <Fragment key={group.id}>
                       <div
                         className={cn("flex min-h-0 min-w-0 flex-col", groupHidden && "hidden")}
-                        style={{ flex: `${maximizedGroupId === null ? group.size : 1} 1 0px` }}
+                        style={{
+                          flex: `${maximizedGroupId === null ? flexShare(group.size, column.groups) : 1} 1 0px`,
+                        }}
                       >
                         {renderGroup(
                           entry,
@@ -1902,6 +1906,12 @@ function RightPanelGroupControls(props: {
       </GroupControlButton>
     </div>
   );
+}
+
+// Grow weights summing below 1 leave part of the free space unfilled, so siblings share it whole.
+function flexShare(size: number, siblings: readonly { readonly size: number }[]): number {
+  const total = siblings.reduce((sum, sibling) => sum + sibling.size, 0);
+  return total > 0 ? size / total : 1;
 }
 
 const DROP_INDICATOR_CLASS: Record<RightPanelDropZone, string> = {
