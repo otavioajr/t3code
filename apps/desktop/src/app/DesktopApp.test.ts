@@ -51,6 +51,7 @@ import * as DesktopApplicationMenu from "../window/DesktopApplicationMenu.ts";
 import * as DesktopWindow from "../window/DesktopWindow.ts";
 import * as DesktopWslBackend from "../wsl/DesktopWslBackend.ts";
 
+import * as BrowserExtensions from "../preview/BrowserExtensions.ts";
 import * as BrowserImport from "../preview/BrowserImport/BrowserImport.ts";
 import * as DesktopBackendConfiguration from "../backend/DesktopBackendConfiguration.ts";
 import * as DesktopCliCommand from "./DesktopCliCommand.ts";
@@ -217,6 +218,7 @@ it.effect.each([false, true])(
         Effect.provide(
           Layer.mergeAll(
             Layer.mock(BrowserImport.BrowserImport, {}),
+            Layer.mock(BrowserExtensions.BrowserExtensions, {}),
             Layer.mock(ChildProcessSpawner.ChildProcessSpawner, {}),
             Layer.mock(DesktopBackendConfiguration.DesktopBackendConfiguration, {}),
             Layer.mock(DesktopCliCommand.DesktopCliCommand, {}),

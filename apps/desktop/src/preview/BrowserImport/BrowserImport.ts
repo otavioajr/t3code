@@ -1,4 +1,6 @@
 import type {
+  BrowserHistorySearchInput,
+  BrowserHistorySuggestion,
   BrowserImportInput,
   BrowserImportResult,
   BrowserImportSource,
@@ -25,12 +27,14 @@ import type { ManagedPolicyFileError } from "@t3tools/shared/managedPolicyFile";
 import * as DesktopManagedPolicy from "../../app/DesktopManagedPolicy.ts";
 import * as BrowserSession from "../BrowserSession.ts";
 import { ChromiumCookieReadError, readChromiumCookies } from "./ChromiumCookies.ts";
+import { makeChromiumHistorySearcher } from "./ChromiumHistory.ts";
 import type { CookieReadResult } from "./CookieDatabase.ts";
 import { FirefoxCookieReadError, readFirefoxCookies } from "./FirefoxCookies.ts";
 import { readSafariCookies, safariAccessDenied, SafariCookieReadError } from "./SafariCookies.ts";
 import {
   BROWSER_IMPORT_SOURCES,
   resolveCookieDatabase,
+  resolveHistoryDatabase,
   isSourceInstalled,
   isSourceRunning,
   listSourceProfiles,
@@ -60,15 +64,20 @@ export class BrowserImportPolicyError extends Schema.TaggedError<BrowserImportPo
     policyPath: Schema.String,
     /** Absent when the policy could not be read or decoded. */
     organization: Schema.optional(Schema.String),
+    /** What the policy blocked; absent means the cookie import. */
+    action: Schema.optional(Schema.String),
     cause: Schema.optional(Schema.Defect()),
   },
 ) {
   override get message(): string {
+    const action = this.action ?? "importing browser cookies";
     return this.organization === undefined
-      ? `The managed policy at ${this.policyPath} could not be read, so importing browser cookies is not allowed.`
-      : managedPolicyDeniedMessage(this.organization, "importing browser cookies");
+      ? `The managed policy at ${this.policyPath} could not be read, so ${action} is not allowed.`
+      : managedPolicyDeniedMessage(this.organization, action);
   }
 }
+
+const HISTORY_SUGGESTIONS_ACTION = "suggesting pages from browser history";
 
 /**
  * A policy that cannot be read or decoded denies the import: cookies are credentials, and the
@@ -80,14 +89,23 @@ export const checkBrowserImportPolicy = Effect.fn("BrowserImport.checkPolicy")(f
     ManagedPolicyFileError,
     R
   >,
+  action?: string,
 ) {
   const policy = yield* readPolicy.pipe(
-    Effect.mapError((cause) => new BrowserImportPolicyError({ policyPath: cause.path, cause })),
+    Effect.mapError(
+      (cause) =>
+        new BrowserImportPolicyError({
+          policyPath: cause.path,
+          ...(action === undefined ? {} : { action }),
+          cause,
+        }),
+    ),
   );
   if (policy?.document.limits?.browserCookieImport === false) {
     return yield* new BrowserImportPolicyError({
       policyPath: policy.source,
       organization: policy.document.organization,
+      ...(action === undefined ? {} : { action }),
     });
   }
 });
@@ -118,6 +136,14 @@ export class BrowserImport extends Context.Service<
   BrowserImport,
   {
     readonly listSources: Effect.Effect<ReadonlyArray<BrowserImportSource>>;
+    /** Unlike `listSources`, lists profiles while the browser runs: history is read from a copy. */
+    readonly listHistorySources: Effect.Effect<ReadonlyArray<BrowserImportSource>>;
+    readonly searchHistory: (
+      input: BrowserHistorySearchInput,
+    ) => Effect.Effect<
+      ReadonlyArray<BrowserHistorySuggestion>,
+      BrowserImportFailedError | BrowserImportPolicyError
+    >;
     readonly importCookies: (input: {
       readonly input: BrowserImportInput;
       readonly scope: string;
@@ -229,6 +255,84 @@ export const make = Effect.gen(function* BrowserImportMake() {
       } satisfies BrowserImportSource;
     }),
   ).pipe(Effect.provide(platformServices));
+
+  const historySearcher = yield* makeChromiumHistorySearcher;
+
+  const listHistorySources: Effect.Effect<ReadonlyArray<BrowserImportSource>> = Effect.forEach(
+    BROWSER_IMPORT_SOURCES.filter((definition) => definition.engine === "chromium"),
+    Effect.fnUntraced(function* (definition) {
+      if (!definition.platforms.includes(pathContext.platform)) {
+        return {
+          id: definition.id,
+          name: definition.name,
+          profiles: [],
+          unavailable: "unsupportedPlatform",
+        } satisfies BrowserImportSource;
+      }
+      const profiles = yield* listSourceProfiles(definition, pathContext);
+      const hasHistory = yield* Effect.forEach(profiles, (profile) =>
+        resolveHistoryDatabase(definition, pathContext, profile.directory).pipe(
+          Effect.map((database) => database !== undefined),
+        ),
+      );
+      const withHistory = profiles.filter((_, index) => hasHistory[index] === true);
+      return {
+        id: definition.id,
+        name: definition.name,
+        profiles: withHistory.map(({ directory, name }) => ({ directory, name })),
+        ...(withHistory.length === 0 ? { unavailable: "notInstalled" as const } : {}),
+      } satisfies BrowserImportSource;
+    }),
+  ).pipe(Effect.provide(platformServices));
+
+  const searchHistory = Effect.fn("BrowserImport.searchHistory")(function* (
+    input: BrowserHistorySearchInput,
+  ) {
+    yield* checkBrowserImportPolicy(managedPolicy.read, HISTORY_SUGGESTIONS_ACTION);
+    const definition = BROWSER_IMPORT_SOURCES.find((candidate) => candidate.id === input.sourceId);
+    if (definition?.engine !== "chromium") {
+      return yield* new BrowserImportFailedError({
+        sourceId: input.sourceId,
+        reason: "unknownSource",
+      });
+    }
+    if (!definition.platforms.includes(pathContext.platform)) {
+      return yield* new BrowserImportFailedError({
+        sourceId: definition.id,
+        reason: "unsupportedPlatform",
+      });
+    }
+
+    // IPC profile paths must match the source's listing to prevent traversal outside browser user-data.
+    const sourceProfiles = yield* listSourceProfiles(definition, pathContext).pipe(
+      Effect.provide(platformServices),
+    );
+    const requestedProfile = sourceProfiles.find(
+      (profile) => profile.directory === input.sourceProfileDirectory,
+    );
+    if (requestedProfile === undefined) {
+      return yield* new BrowserImportFailedError({
+        sourceId: definition.id,
+        reason: "unknownSourceProfile",
+      });
+    }
+    const databasePath = yield* resolveHistoryDatabase(
+      definition,
+      pathContext,
+      requestedProfile.directory,
+    ).pipe(Effect.provide(platformServices));
+    if (databasePath === undefined) {
+      return yield* new BrowserImportFailedError({ sourceId: definition.id, reason: "readFailed" });
+    }
+    return yield* historySearcher
+      .search(databasePath, input.query)
+      .pipe(
+        Effect.mapError(
+          (cause) =>
+            new BrowserImportFailedError({ sourceId: definition.id, reason: "readFailed", cause }),
+        ),
+      );
+  });
 
   const importCookies = Effect.fn("BrowserImport.importCookies")(function* (input: {
     readonly input: BrowserImportInput;
@@ -349,7 +453,7 @@ export const make = Effect.gen(function* BrowserImportMake() {
     return yield* writeCookies(session, result);
   });
 
-  return BrowserImport.of({ listSources, importCookies });
+  return BrowserImport.of({ listSources, listHistorySources, searchHistory, importCookies });
 });
 
 export const layer = Layer.effect(BrowserImport, make);

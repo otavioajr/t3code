@@ -178,5 +178,12 @@ export const installDesktopIpcHandlers = Effect.fn("desktop.ipc.installHandlers"
     >(previewMethod);
   }
   yield* ipc.handle(PreviewIpc.listBrowserImportSources);
+  yield* ipc.handle(PreviewIpc.listBrowserHistorySources);
+  yield* ipc.handle(PreviewIpc.searchBrowserHistory);
+  yield* ipc.handle(PreviewIpc.listBrowserExtensions);
+  yield* ipc.handle(PreviewIpc.listInstalledBrowserExtensions);
+  yield* ipc.handle(PreviewIpc.addBrowserExtension);
+  yield* ipc.handle(PreviewIpc.setBrowserExtensionEnabled);
+  yield* ipc.handle(PreviewIpc.removeBrowserExtension);
   yield* ipc.handle(PreviewIpc.importBrowserCookies);
 });

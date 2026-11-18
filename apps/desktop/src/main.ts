@@ -72,6 +72,7 @@ import * as DesktopTelemetryPublisher from "./telemetry/DesktopTelemetryPublishe
 import * as DesktopRendererHistory from "./telemetry/DesktopRendererHistory.ts";
 import * as DesktopUpdatePolicy from "./updates/DesktopUpdatePolicy.ts";
 import * as DesktopUpdates from "./updates/DesktopUpdates.ts";
+import * as BrowserExtensions from "./preview/BrowserExtensions.ts";
 import * as BrowserImport from "./preview/BrowserImport/BrowserImport.ts";
 import * as LinuxBrowserSecret from "./preview/BrowserImport/LinuxBrowserSecret.ts";
 import * as BrowserSession from "./preview/BrowserSession.ts";
@@ -182,6 +183,7 @@ const layerDesktopPreview = PreviewManager.layer.pipe(
   Layer.provideMerge(DesktopBrowserHost.layer),
   // IPC needs both services on the same BrowserSession.
   Layer.provideMerge(BrowserImport.layer.pipe(Layer.provide(LinuxBrowserSecret.layer))),
+  Layer.provideMerge(BrowserExtensions.layer),
   Layer.provideMerge(BrowserSession.layer),
   Layer.provideMerge(PreviewPasskeys.layer),
   Layer.provideMerge(layerDesktopFoundation),

@@ -1123,6 +1123,18 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["address bar duckduckgo google bing brave kagi ecosia custom url"],
   },
   {
+    id: "browser-history-suggestions",
+    title: "Suggest history from",
+    to: "/settings/browser",
+    searchTerms: ["address bar autocomplete chrome brave edge arc visited pages history"],
+  },
+  {
+    id: "browser-extensions",
+    title: "Extensions",
+    to: "/settings/browser",
+    searchTerms: ["browser chrome extension unpacked crx add-on plugin load import"],
+  },
+  {
     id: "pull-request-links-open-in-app",
     title: "Open pull requests in T3 Code",
     to: "/settings/diffs",

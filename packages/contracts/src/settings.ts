@@ -37,6 +37,7 @@ import {
 import { ModelSelection } from "./modelSelection.ts";
 import { ProjectScript, type ProjectMutation } from "./project.ts";
 import { DEFAULT_RUNTIME_MODE, RuntimeMode } from "./providerPolicy.ts";
+import { BrowserHistorySuggestionSource } from "./browserImport.ts";
 import { BrowserProfile, BrowserProfileId, DEFAULT_BROWSER_PROFILE_ID } from "./browserProfile.ts";
 import {
   BrowserRecordingFrameRate,
@@ -455,6 +456,11 @@ export const ClientSettingsSchema = Schema.Struct({
 
   browserAutoShowFloatingPreview: Schema.Boolean.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_BROWSER_AUTO_SHOW_FLOATING_PREVIEW)),
+  ),
+
+  // Opt-in: the address bar suggests pages from this Chromium profile's history. Desktop only.
+  browserHistorySuggestionSource: Schema.NullOr(BrowserHistorySuggestionSource).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
   ),
 
   browserProfiles: Schema.Array(BrowserProfile).pipe(
@@ -2081,6 +2087,7 @@ export const ClientSettingsPatch = Schema.Struct({
   browserSearchEngine: Schema.optionalKey(BrowserSearchEngine),
   browserCustomSearchUrl: Schema.optionalKey(BrowserCustomSearchUrl),
   browserAutoShowFloatingPreview: Schema.optionalKey(Schema.Boolean),
+  browserHistorySuggestionSource: Schema.optionalKey(Schema.NullOr(BrowserHistorySuggestionSource)),
   browserProfiles: Schema.optionalKey(Schema.Array(BrowserProfile)),
   browserDefaultProfileId: Schema.optionalKey(BrowserProfileId),
   confirmQuit: Schema.optionalKey(QuitConfirmationMode),

@@ -986,6 +986,7 @@ export function PreviewView({
         refreshDisabled={refreshDisabled || serverInputDisabled}
         inputDisabled={serverInputDisabled}
         urlInputRef={urlInputRef}
+        projectHistory={recentHistoryEntries}
         onBack={handleBack}
         onForward={handleForward}
         onRefresh={handleRefresh}

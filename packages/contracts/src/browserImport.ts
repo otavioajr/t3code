@@ -76,6 +76,30 @@ export const BrowserImportResult = Schema.Struct({
 });
 export type BrowserImportResult = typeof BrowserImportResult.Type;
 
+/** The Chromium profile the address bar suggests visited pages from. Chosen in Settings. */
+export const BrowserHistorySuggestionSource = Schema.Struct({
+  sourceId: BrowserImportSourceId,
+  sourceProfileDirectory: TrimmedNonEmptyString,
+});
+export type BrowserHistorySuggestionSource = typeof BrowserHistorySuggestionSource.Type;
+
+const BROWSER_HISTORY_SEARCH_MAX_QUERY_LENGTH = 256;
+
+export const BrowserHistorySearchInput = Schema.Struct({
+  ...BrowserHistorySuggestionSource.fields,
+  query: Schema.String.check(Schema.isMaxLength(BROWSER_HISTORY_SEARCH_MAX_QUERY_LENGTH)),
+});
+export type BrowserHistorySearchInput = typeof BrowserHistorySearchInput.Type;
+
+export const BrowserHistorySuggestion = Schema.Struct({
+  url: TrimmedNonEmptyString,
+  title: Schema.optional(Schema.String),
+  /** Milliseconds since the Unix epoch. */
+  lastVisitedAt: Schema.Number,
+  visitCount: Schema.Int,
+});
+export type BrowserHistorySuggestion = typeof BrowserHistorySuggestion.Type;
+
 const BROWSER_IMPORT_UNAVAILABLE_COPY: Readonly<Record<BrowserImportUnavailableReason, string>> = {
   notInstalled: "Not installed on this machine.",
   needsKeychainApproval: "Needs Keychain access to read its cookies.",

@@ -7,6 +7,7 @@ import {
   AuthSettingsWriteScope,
   BrowserImportFailureReason,
   BROWSER_PROFILE_MAX_COUNT,
+  type BrowserHistorySuggestionSource,
   type BrowserLinkTarget,
   type BrowserProfile,
   BrowserSearchEngine,
@@ -41,7 +42,7 @@ import { isValidSearchUrlTemplate } from "@t3tools/shared/preview";
 import { PREVIEW_VIEWPORT_PRESETS } from "@t3tools/shared/previewViewport";
 import { MoreVertical, Plus as PlusIcon } from "lucide-react";
 import * as Schema from "effect/Schema";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { ScreenRotationIcon } from "~/browser/ScreenRotationIcon";
 import { resolveEnvironmentOptionLabel } from "~/components/BranchToolbar.logic";
@@ -116,6 +117,7 @@ import {
 import { searchableSetting } from "./settingsSearch";
 import { AdvancedSettings } from "./AdvancedSettings";
 import { useSettingsScope } from "./SettingsScopeContext";
+import { BrowserExtensionsSetting } from "./BrowserExtensionsSettings";
 import { BrowserImportWizard, type WizardTarget } from "./BrowserImportWizard";
 import type { ImportOutcome } from "./browserImportWizard.logic";
 
@@ -1107,6 +1109,90 @@ function BrowserAutoShowFloatingPreviewSetting({ disabled }: { readonly disabled
   );
 }
 
+const NO_HISTORY_SOURCE = "none";
+const historySourceKey = (source: BrowserHistorySuggestionSource) =>
+  JSON.stringify([source.sourceId, source.sourceProfileDirectory]);
+
+function BrowserHistorySuggestionsSetting({ disabled }: { readonly disabled: boolean }) {
+  const selected = useClientSettings((settings) => settings.browserHistorySuggestionSource);
+  const updateSettings = useUpdatePrimarySettings();
+  const denial = managedCapabilityDenial(usePrimaryManagedPolicy(), "browserCookieImport");
+  const [sources, setSources] = useState<ReadonlyArray<BrowserImportSource>>([]);
+
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- lists installed browsers through the desktop bridge, outside React
+  useEffect(() => {
+    if (!previewBridge) return;
+    let cancelled = false;
+    void previewBridge
+      .listBrowserHistorySources()
+      .then((listed) => {
+        if (!cancelled) setSources(listed);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const options = sources.flatMap((source) =>
+    source.profiles.map((profile) => ({
+      key: historySourceKey({ sourceId: source.id, sourceProfileDirectory: profile.directory }),
+      source: { sourceId: source.id, sourceProfileDirectory: profile.directory },
+      label: `${source.name} – ${profile.name}`,
+    })),
+  );
+  const selectedKey = selected ? historySourceKey(selected) : NO_HISTORY_SOURCE;
+  const selectedLabel =
+    selected === null
+      ? "None"
+      : (options.find((option) => option.key === selectedKey)?.label ??
+        `${selected.sourceId} – ${selected.sourceProfileDirectory}`);
+
+  return (
+    <SettingsRow
+      {...searchableSetting("browser-history-suggestions")}
+      description="Suggest pages from a Chromium browser's history while you type in the address bar. History is read from a copy when you type; nothing is imported or stored."
+      managed={denial}
+      resetAction={
+        !disabled && selected !== null ? (
+          <SettingResetButton
+            label="history suggestions"
+            onClick={() => updateSettings({ browserHistorySuggestionSource: null })}
+          />
+        ) : null
+      }
+      control={
+        <Select
+          disabled={disabled || denial !== undefined}
+          value={selectedKey}
+          onValueChange={(value) => {
+            if (value === NO_HISTORY_SOURCE) {
+              updateSettings({ browserHistorySuggestionSource: null });
+              return;
+            }
+            const option = options.find((candidate) => candidate.key === value);
+            if (option) updateSettings({ browserHistorySuggestionSource: option.source });
+          }}
+        >
+          <SelectTrigger size="sm" className="w-full sm:w-56" aria-label="Suggest history from">
+            <SelectValue>{selectedLabel}</SelectValue>
+          </SelectTrigger>
+          <SelectPopup align="end" alignItemWithTrigger={false}>
+            <SelectItem hideIndicator value={NO_HISTORY_SOURCE}>
+              None
+            </SelectItem>
+            {options.map((option) => (
+              <SelectItem hideIndicator key={option.key} value={option.key}>
+                {option.label}
+              </SelectItem>
+            ))}
+          </SelectPopup>
+        </Select>
+      }
+    />
+  );
+}
+
 function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
   const userProfiles = useClientSettings((settings) => settings.browserProfiles);
   const defaultProfileId = useClientSettings((settings) => settings.browserDefaultProfileId);
@@ -1591,7 +1677,11 @@ export function BrowserSettingsPanel() {
         <SettingsUnavailableGroup message={desktopOnlyMessage}>
           <BrowserProfilesSetting disabled={desktopOnly} />
           <BrowserLinkTargetSetting disabled={desktopOnly} />
+          <BrowserHistorySuggestionsSetting disabled={desktopOnly} />
           <BrowserAutoShowFloatingPreviewSetting disabled={desktopOnly} />
+        </SettingsUnavailableGroup>
+        <SettingsUnavailableGroup message={desktopOnlyMessage}>
+          <BrowserExtensionsSetting disabled={desktopOnly} />
         </SettingsUnavailableGroup>
         {/* Not desktop-only: web clients search from server-run browser tabs too. */}
         <BrowserSearchEngineSetting />

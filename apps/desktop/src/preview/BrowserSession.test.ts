@@ -22,6 +22,10 @@ const { fromPartition, sessions } = vi.hoisted(() => ({
       readonly setPermissionCheckHandler: ReturnType<typeof vi.fn>;
       readonly setUserAgent: ReturnType<typeof vi.fn>;
       readonly webRequest: { readonly onBeforeSendHeaders: ReturnType<typeof vi.fn> };
+      readonly extensions: {
+        readonly loadExtension: ReturnType<typeof vi.fn<(path: string) => Promise<{ id: string }>>>;
+        readonly removeExtension: ReturnType<typeof vi.fn>;
+      };
     }
   >(),
 }));
@@ -150,11 +154,58 @@ describe("BrowserSession", () => {
         setPermissionCheckHandler: vi.fn(),
         setUserAgent: vi.fn(),
         webRequest: { onBeforeSendHeaders: vi.fn() },
+        extensions: {
+          loadExtension: vi.fn((path: string) =>
+            path.includes("broken")
+              ? Promise.reject(new Error("Manifest is not valid"))
+              : Promise.resolve({ id: `id:${path}` }),
+          ),
+          removeExtension: vi.fn(),
+        },
       };
       sessions.set(partition, browserSession);
       return browserSession;
     });
   });
+
+  it.effect("loads extensions into persistent sessions only, now and when created later", () =>
+    Effect.gen(function* () {
+      const browserSessions = yield* BrowserSession.BrowserSession;
+      yield* browserSessions.getSession("scope-a");
+      assert.deepStrictEqual(
+        yield* browserSessions.setExtensions(["/ext/a", "/ext/broken"]),
+        new Map([["/ext/broken", "Manifest is not valid"]]),
+      );
+      const existingExtensions = sessions.get(
+        yield* browserSessions.getPartition("scope-a"),
+      )!.extensions;
+      assert.deepStrictEqual(
+        existingExtensions.loadExtension.mock.calls.map(([path]) => path),
+        ["/ext/a", "/ext/broken"],
+      );
+
+      // A later session loads what is currently desired, an incognito one never does.
+      yield* browserSessions.getSession("scope-b");
+      const later = sessions.get(yield* browserSessions.getPartition("scope-b"))!.extensions;
+      assert.deepStrictEqual(
+        later.loadExtension.mock.calls.map(([path]) => path),
+        ["/ext/a", "/ext/broken"],
+      );
+      yield* browserSessions.getSession("scope-c", false);
+      const incognito = sessions.get(
+        yield* browserSessions.getPartition("scope-c", false),
+      )!.extensions;
+      assert.strictEqual(incognito.loadExtension.mock.calls.length, 0);
+
+      // Dropping a directory unloads it everywhere it was loaded and keeps the rest.
+      yield* browserSessions.setExtensions(["/ext/a"]);
+      assert.deepStrictEqual(existingExtensions.removeExtension.mock.calls, []);
+      assert.deepStrictEqual(later.removeExtension.mock.calls, []);
+      yield* browserSessions.setExtensions([]);
+      assert.deepStrictEqual(existingExtensions.removeExtension.mock.calls, [["id:/ext/a"]]);
+      assert.deepStrictEqual(later.removeExtension.mock.calls, [["id:/ext/a"]]);
+    }).pipe(Effect.provide(layer)),
+  );
 
   it.effect("derives deterministic partitions and memoizes sessions", () =>
     Effect.gen(function* () {
@@ -224,6 +275,7 @@ describe("BrowserSession", () => {
             userAgent = next;
           }),
           webRequest: { onBeforeSendHeaders: vi.fn() },
+          extensions: { loadExtension: vi.fn(), removeExtension: vi.fn() },
         };
         sessions.set(partition, browserSession);
         return browserSession;

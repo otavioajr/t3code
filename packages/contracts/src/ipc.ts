@@ -5,6 +5,14 @@ import { SnapShotSource } from "./chatAttachment.ts";
 import { EnvironmentId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { BrowserProfileId } from "./browserProfile.ts";
 import type {
+  BrowserExtension,
+  BrowserExtensionAddInput,
+  BrowserInstalledExtension,
+  BrowserInstalledExtensionsInput,
+} from "./browserExtensions.ts";
+import type {
+  BrowserHistorySearchInput,
+  BrowserHistorySuggestion,
   BrowserImportResult,
   BrowserImportSource,
   BrowserImportSourceId,
@@ -1299,6 +1307,24 @@ export interface DesktopPreviewBridge {
     profileId?: string,
   ) => Promise<DesktopPreviewWebviewConfig>;
   listBrowserImportSources: () => Promise<ReadonlyArray<BrowserImportSource>>;
+  /** Chromium browsers whose history can be searched, listed even while the browser is running. */
+  listBrowserHistorySources: () => Promise<ReadonlyArray<BrowserImportSource>>;
+  searchBrowserHistory: (
+    input: BrowserHistorySearchInput,
+  ) => Promise<ReadonlyArray<BrowserHistorySuggestion>>;
+  listBrowserExtensions: () => Promise<ReadonlyArray<BrowserExtension>>;
+  listInstalledBrowserExtensions: (
+    input: BrowserInstalledExtensionsInput,
+  ) => Promise<ReadonlyArray<BrowserInstalledExtension>>;
+  /** Resolves to the updated list so callers need no second round trip. */
+  addBrowserExtension: (
+    input: BrowserExtensionAddInput,
+  ) => Promise<ReadonlyArray<BrowserExtension>>;
+  setBrowserExtensionEnabled: (
+    id: string,
+    enabled: boolean,
+  ) => Promise<ReadonlyArray<BrowserExtension>>;
+  removeBrowserExtension: (id: string) => Promise<ReadonlyArray<BrowserExtension>>;
   importBrowserCookies: (input: {
     readonly environmentId: EnvironmentId;
     readonly sourceId: BrowserImportSourceId;

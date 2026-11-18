@@ -204,6 +204,7 @@ const layerBrowserSession = Layer.succeed(
     getPartition: () => Effect.succeed("persist:t3code-preview-test"),
     isPartition: (partition) => partition.startsWith("persist:t3code-preview-"),
     getSession: () => Effect.succeed(previewSession as unknown as Electron.Session),
+    setExtensions: () => Effect.succeed(new Map()),
     clearCookies: () => Effect.void,
     cookiesCleared: () => Effect.void,
     clearCache: () => Effect.void,

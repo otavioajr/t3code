@@ -18,3 +18,10 @@ the import wizard afterward. You can revoke Full Disk Access once the import is 
 On Windows, import supports Firefox, Zen, and Helium profiles that use standard profile encryption.
 Other Chromium-based browsers use app-bound encryption and cannot be imported. Partitioned cookies
 are skipped on all platforms.
+
+## Suggest history in the address bar
+
+Open **Settings → Browser → Suggest history from** and pick a Chromium browser profile, such as
+Chrome or Brave, to get its visited pages as suggestions while you type in the preview browser's
+address bar. It is off by default, works while that browser is open, and reads the history live
+without importing or storing it. Suggestions appear in the desktop app only.

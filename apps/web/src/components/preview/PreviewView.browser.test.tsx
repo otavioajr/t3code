@@ -399,7 +399,7 @@ describe("PreviewView", () => {
       },
     } as NonNullable<typeof window.desktopBridge>;
     await using screen = await render(view());
-    const address = page.getByRole("textbox");
+    const address = page.getByRole("combobox", { name: "Search or enter URL" });
     const input = address.element() as HTMLInputElement;
     const forward = () =>
       act(() => {
@@ -426,7 +426,7 @@ describe("PreviewView", () => {
   it("focuses the address bar each time the focus-url shortcut fires", async () => {
     setup();
     await using _screen = await render(view());
-    const address = page.getByRole("textbox");
+    const address = page.getByRole("combobox", { name: "Search or enter URL" });
 
     act(() => dispatchPreviewAction("focus-url"));
     await expect.element(address).toHaveFocus();

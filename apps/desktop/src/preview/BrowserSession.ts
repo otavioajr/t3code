@@ -187,6 +187,18 @@ export class BrowserSessionCacheClearError extends Schema.TaggedError<BrowserSes
   }
 }
 
+export class BrowserSessionExtensionError extends Schema.TaggedError<BrowserSessionExtensionError>()(
+  "BrowserSessionExtensionError",
+  {
+    directory: Schema.String,
+    cause: Schema.Defect(),
+  },
+) {
+  override get message(): string {
+    return `Failed to load or unload the browser extension at ${this.directory}.`;
+  }
+}
+
 export const BrowserSessionGetSessionError = Schema.Union([
   BrowserSessionPartitionDerivationError,
   BrowserSessionCreationError,
@@ -215,6 +227,13 @@ export class BrowserSession extends Context.Service<
       persistent?: boolean,
       namespace?: BrowserSessionPartitionNamespace,
     ) => Effect.Effect<Session, BrowserSessionGetSessionError>;
+    /**
+     * Sets the unpacked extension directories every persistent profile session loads, now and
+     * when it is created later. Resolves to the load error message by directory; never fails.
+     */
+    readonly setExtensions: (
+      paths: ReadonlyArray<string>,
+    ) => Effect.Effect<ReadonlyMap<string, string>>;
     /** Omit `partitions` to clear every known partition. */
     readonly clearCookies: (
       partitions?: ReadonlyArray<string>,
@@ -554,6 +573,53 @@ export const make = Effect.gen(function* BrowserSessionMake() {
   });
 
   const sessionsRef = yield* SynchronizedRef.make<ReadonlyMap<string, Session>>(new Map());
+  // Electron forgets extensions on restart, so each session tracks what it loaded: directory -> id.
+  const loadedExtensions = new WeakMap<Session, Map<string, string>>();
+  const extensionGate = yield* Semaphore.make(1);
+  let desiredExtensions: ReadonlyArray<string> = [];
+
+  const syncExtensions = Effect.fnUntraced(function* (
+    browserSession: Session,
+    errors: Map<string, string>,
+  ) {
+    const loaded = loadedExtensions.get(browserSession) ?? new Map<string, string>();
+    loadedExtensions.set(browserSession, loaded);
+    const desired = new Set(desiredExtensions);
+    for (const [directory, extensionId] of loaded) {
+      if (desired.has(directory)) continue;
+      loaded.delete(directory);
+      yield* Effect.try({
+        try: () => browserSession.extensions.removeExtension(extensionId),
+        catch: (cause) => new BrowserSessionExtensionError({ directory, cause }),
+      }).pipe(Effect.ignore);
+    }
+    for (const directory of desired) {
+      if (loaded.has(directory)) continue;
+      yield* Effect.tryPromise({
+        try: () => browserSession.extensions.loadExtension(directory),
+        catch: (cause) => new BrowserSessionExtensionError({ directory, cause }),
+      }).pipe(
+        Effect.tap((extension) => Effect.sync(() => loaded.set(directory, extension.id))),
+        Effect.catch((error) =>
+          Effect.logWarning("Could not load a browser extension.", {
+            directory,
+            cause: error,
+          }).pipe(
+            Effect.andThen(
+              Effect.sync(() => {
+                errors.set(
+                  directory,
+                  error.cause instanceof Error
+                    ? error.cause.message
+                    : "The extension failed to load.",
+                );
+              }),
+            ),
+          ),
+        ),
+      );
+    }
+  });
 
   const getPartition = Effect.fn("BrowserSession.getPartition")(function* (
     scope = "shared",
@@ -676,8 +742,32 @@ export const make = Effect.gen(function* BrowserSessionMake() {
             }),
           ),
         ),
+        // Electron cannot load extensions into in-memory (incognito) sessions.
+        Effect.tap(([browserSession]) =>
+          persistent && desiredExtensions.length > 0
+            ? extensionGate.withPermits(1)(syncExtensions(browserSession, new Map()))
+            : Effect.void,
+        ),
       );
     });
+  });
+
+  const setExtensions = Effect.fn("BrowserSession.setExtensions")(function* (
+    paths: ReadonlyArray<string>,
+  ) {
+    return yield* extensionGate.withPermits(1)(
+      Effect.gen(function* () {
+        desiredExtensions = paths;
+        const errors = new Map<string, string>();
+        const sessions = yield* SynchronizedRef.get(sessionsRef);
+        yield* Effect.forEach(
+          [...sessions].filter(([partition]) => partition.startsWith(PREVIEW_PARTITION_PREFIX)),
+          ([, browserSession]) => syncExtensions(browserSession, errors),
+          { discard: true },
+        );
+        return errors as ReadonlyMap<string, string>;
+      }),
+    );
   });
 
   return BrowserSession.of({
@@ -686,6 +776,7 @@ export const make = Effect.gen(function* BrowserSessionMake() {
       partition.startsWith(PREVIEW_PARTITION_PREFIX) ||
       partition.startsWith(PREVIEW_EPHEMERAL_PARTITION_PREFIX),
     getSession,
+    setExtensions,
     clearCookies: Effect.fn("BrowserSession.clearCookies")(function* (partitions?) {
       const sessions = yield* SynchronizedRef.get(sessionsRef);
       yield* Effect.forEach(

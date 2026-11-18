@@ -12,13 +12,25 @@ import {
   type KeyboardEvent,
   type ReactNode,
   type RefObject,
+  useRef,
   useState,
 } from "react";
 
+import type { BrowserHistoryEntry } from "~/browserHistoryStore";
+import {
+  Autocomplete,
+  AutocompleteBareInput,
+  AutocompleteItem,
+  AutocompleteList,
+  AutocompletePopup,
+} from "~/components/ui/autocomplete";
 import { Button } from "~/components/ui/button";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "~/components/ui/input-group";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import { cn } from "~/lib/utils";
+
+import { type AddressBarSuggestion } from "./addressBarSuggestions";
+import { useAddressBarSuggestions } from "./useAddressBarSuggestions";
 
 interface Props {
   url: string;
@@ -47,7 +59,11 @@ interface Props {
   pickDisabledReason?: string | undefined;
   trailingActions?: ReactNode;
   leadingActions?: ReactNode;
+  /** The project's visited pages, offered as address bar suggestions while typing. */
+  projectHistory?: ReadonlyArray<BrowserHistoryEntry> | undefined;
 }
+
+const NO_HISTORY: ReadonlyArray<BrowserHistoryEntry> = [];
 
 const NOOP = () => {};
 
@@ -77,9 +93,17 @@ export function PreviewChromeRow({
   pickDisabledReason,
   trailingActions,
   leadingActions,
+  projectHistory = NO_HISTORY,
 }: Props) {
   const [draft, setDraft] = useState(url);
   const [inputFocused, setInputFocused] = useState(false);
+  const addressGroupRef = useRef<HTMLDivElement>(null);
+  const suggestionHighlightedRef = useRef(false);
+  const suggestions = useAddressBarSuggestions({
+    query: draft,
+    active: inputFocused,
+    projectEntries: projectHistory,
+  });
 
   const submit = (event?: FormEvent | KeyboardEvent) => {
     event?.preventDefault();
@@ -152,46 +176,84 @@ export function PreviewChromeRow({
 
         {leadingActions}
 
-        <InputGroup variant="ghost" className="group/address h-7 flex-1">
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <InputGroupInput
-                  ref={inputRef}
-                  value={inputFocused ? draft : url}
-                  onChange={(event) => setDraft(event.target.value)}
-                  onFocus={() => {
-                    setDraft(url);
-                    setInputFocused(true);
-                    queueMicrotask(() => inputRef.current?.select());
-                  }}
-                  onBlur={() => {
-                    setInputFocused(false);
-                  }}
-                  onKeyDown={(event) => {
-                    if (event.nativeEvent.isComposing || event.keyCode === 229) {
-                      // A trusted Enter would still submit the form implicitly.
-                      if (event.key === "Enter") event.preventDefault();
-                      return;
-                    }
-                    if (event.key === "Enter") submit(event);
-                    if (event.key === "Escape") {
-                      event.preventDefault();
+        <InputGroup ref={addressGroupRef} variant="ghost" className="group/address h-7 flex-1">
+          <Autocomplete
+            items={suggestions}
+            mode="none"
+            value={inputFocused ? draft : url}
+            itemToStringValue={(item: AddressBarSuggestion) => item.url}
+            onValueChange={(next, details) => {
+              // Escape clears a closed popup's input; the key handler below restores the URL instead.
+              if (details.reason === "input-change") setDraft(next);
+            }}
+            onItemHighlighted={(item) => {
+              suggestionHighlightedRef.current = item !== undefined;
+            }}
+          >
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <AutocompleteBareInput
+                    ref={inputRef}
+                    onFocus={() => {
                       setDraft(url);
+                      setInputFocused(true);
+                      queueMicrotask(() => inputRef.current?.select());
+                    }}
+                    onBlur={() => {
+                      setInputFocused(false);
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.nativeEvent.isComposing || event.keyCode === 229) {
+                        // A trusted Enter would still submit the form implicitly.
+                        if (event.key === "Enter") event.preventDefault();
+                        return;
+                      }
+                      // Enter on a highlighted suggestion opens that suggestion instead.
+                      if (event.key === "Enter" && !suggestionHighlightedRef.current) submit(event);
+                      if (event.key === "Escape") {
+                        event.preventDefault();
+                        setDraft(url);
+                        inputRef.current?.blur();
+                      }
+                    }}
+                    placeholder="Search or enter URL"
+                    aria-label="Search or enter URL"
+                    data-workspace-focus-default
+                    spellCheck={false}
+                    disabled={inputDisabled}
+                    data-preview-url-input
+                    render={<InputGroupInput nativeInput size="sm" />}
+                  />
+                }
+              />
+            </Tooltip>
+            <AutocompletePopup anchor={addressGroupRef}>
+              <AutocompleteList>
+                {(suggestion: AddressBarSuggestion) => (
+                  <AutocompleteItem
+                    key={suggestion.url}
+                    value={suggestion}
+                    onClick={() => {
+                      onSubmit(suggestion.url);
                       inputRef.current?.blur();
-                    }
-                  }}
-                  placeholder="Search or enter URL"
-                  aria-label="Search or enter URL"
-                  data-workspace-focus-default
-                  spellCheck={false}
-                  disabled={inputDisabled}
-                  data-preview-url-input
-                  size="sm"
-                />
-              }
-            />
-          </Tooltip>
+                    }}
+                  >
+                    <span className="flex min-w-0 flex-1 items-baseline gap-2">
+                      <span className="shrink-0 truncate">
+                        {suggestion.title ?? suggestion.url}
+                      </span>
+                      {suggestion.title ? (
+                        <span className="min-w-0 truncate text-xs text-muted-foreground">
+                          {suggestion.url}
+                        </span>
+                      ) : null}
+                    </span>
+                  </AutocompleteItem>
+                )}
+              </AutocompleteList>
+            </AutocompletePopup>
+          </Autocomplete>
           {onOpenInBrowser && !inputFocused ? (
             <InputGroupAddon align="inline-end">
               {}

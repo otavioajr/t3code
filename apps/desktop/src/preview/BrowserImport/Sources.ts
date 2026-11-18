@@ -233,6 +233,22 @@ export const resolveCookieDatabase = Effect.fnUntraced(function* (
   return undefined;
 });
 
+/** Chromium keeps visited pages in `History` at the profile root; other engines are not supported. */
+export const resolveHistoryDatabase = Effect.fnUntraced(function* (
+  definition: BrowserImportSourceDefinition,
+  context: BrowserImportPathContext,
+  profileDirectory: string,
+) {
+  if (definition.engine !== "chromium") return undefined;
+  const root = definition.userDataDirectory(context);
+  if (root === undefined) return undefined;
+  const profilePath = context.path.isAbsolute(profileDirectory)
+    ? profileDirectory
+    : context.path.join(root, profileDirectory);
+  const candidate = context.path.join(profilePath, "History");
+  return (yield* databaseFileExists(candidate)) ? candidate : undefined;
+});
+
 /** Install* sections select defaults, not profiles; only ProfileN blocks describe profiles. */
 export function parseFirefoxProfiles(
   ini: string,

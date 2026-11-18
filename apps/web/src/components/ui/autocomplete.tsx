@@ -73,6 +73,11 @@ function AutocompleteInput({
   );
 }
 
+/** The input alone, for composing inside another input's chrome (an InputGroup) via `render`. */
+function AutocompleteBareInput(props: AutocompletePrimitive.Input.Props) {
+  return <AutocompletePrimitive.Input data-slot="autocomplete-input" {...props} />;
+}
+
 function AutocompletePopup({
   className,
   children,
@@ -241,6 +246,7 @@ function AutocompleteTrigger({
 export {
   Autocomplete,
   AutocompleteInput,
+  AutocompleteBareInput,
   AutocompleteTrigger,
   AutocompletePopup,
   AutocompleteItem,

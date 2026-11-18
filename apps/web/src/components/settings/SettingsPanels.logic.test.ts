@@ -94,6 +94,15 @@ describe("getChangedBrowserSettingLabels", () => {
       }),
     ).toEqual(["Search engine"]);
   });
+
+  it("counts a chosen history suggestion source so restore turns it off", () => {
+    expect(
+      getChangedBrowserSettingLabels({
+        ...DEFAULT_UNIFIED_SETTINGS,
+        browserHistorySuggestionSource: { sourceId: "chrome", sourceProfileDirectory: "Default" },
+      }),
+    ).toEqual(["History suggestions"]);
+  });
 });
 
 describe("auto-settle days field", () => {

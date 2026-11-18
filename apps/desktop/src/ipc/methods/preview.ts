@@ -15,6 +15,14 @@ import {
   DesktopPreviewSetShownInputSchema,
   DesktopPreviewSetColorSchemeInputSchema,
   DesktopPreviewSetZoomFactorInputSchema,
+  BrowserExtension,
+  BrowserExtensionAddInput,
+  BrowserExtensionRemoveInput,
+  BrowserExtensionSetEnabledInput,
+  BrowserHistorySearchInput,
+  BrowserHistorySuggestion,
+  BrowserInstalledExtension,
+  BrowserInstalledExtensionsInput,
   BrowserImportResult,
   BrowserImportSource,
   DesktopPreviewClearDataInputSchema,
@@ -35,6 +43,7 @@ import * as Option from "effect/Option";
 import * as NodeURL from "node:url";
 
 import * as ElectronWindow from "../../electron/ElectronWindow.ts";
+import * as BrowserExtensions from "../../preview/BrowserExtensions.ts";
 import * as BrowserImport from "../../preview/BrowserImport/BrowserImport.ts";
 import * as PreviewManager from "../../preview/Manager.ts";
 import { normalizeCaptureFailure } from "../../preview/captureErrors.ts";
@@ -357,6 +366,76 @@ export const listBrowserImportSources = DesktopIpc.makeIpcMethod({
   handler: Effect.fn("desktop.ipc.preview.listBrowserImportSources")(function* () {
     const browserImport = yield* BrowserImport.BrowserImport;
     return yield* browserImport.listSources;
+  }),
+});
+
+export const listBrowserHistorySources = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.PREVIEW_HISTORY_SOURCES_CHANNEL,
+  payload: Schema.Void,
+  result: Schema.Array(BrowserImportSource),
+  handler: Effect.fn("desktop.ipc.preview.listBrowserHistorySources")(function* () {
+    const browserImport = yield* BrowserImport.BrowserImport;
+    return yield* browserImport.listHistorySources;
+  }),
+});
+
+export const searchBrowserHistory = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.PREVIEW_HISTORY_SEARCH_CHANNEL,
+  payload: BrowserHistorySearchInput,
+  result: Schema.Array(BrowserHistorySuggestion),
+  handler: Effect.fn("desktop.ipc.preview.searchBrowserHistory")(function* (input) {
+    const browserImport = yield* BrowserImport.BrowserImport;
+    return yield* browserImport.searchHistory(input);
+  }),
+});
+
+export const listBrowserExtensions = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.PREVIEW_EXTENSIONS_LIST_CHANNEL,
+  payload: Schema.Void,
+  result: Schema.Array(BrowserExtension),
+  handler: Effect.fn("desktop.ipc.preview.listBrowserExtensions")(function* () {
+    const extensions = yield* BrowserExtensions.BrowserExtensions;
+    return yield* extensions.list;
+  }),
+});
+
+export const listInstalledBrowserExtensions = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.PREVIEW_EXTENSIONS_INSTALLED_CHANNEL,
+  payload: BrowserInstalledExtensionsInput,
+  result: Schema.Array(BrowserInstalledExtension),
+  handler: Effect.fn("desktop.ipc.preview.listInstalledBrowserExtensions")(function* (input) {
+    const extensions = yield* BrowserExtensions.BrowserExtensions;
+    return yield* extensions.listInstalled(input);
+  }),
+});
+
+export const addBrowserExtension = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.PREVIEW_EXTENSIONS_ADD_CHANNEL,
+  payload: BrowserExtensionAddInput,
+  result: Schema.Array(BrowserExtension),
+  handler: Effect.fn("desktop.ipc.preview.addBrowserExtension")(function* (input) {
+    const extensions = yield* BrowserExtensions.BrowserExtensions;
+    return yield* extensions.add(input);
+  }),
+});
+
+export const setBrowserExtensionEnabled = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.PREVIEW_EXTENSIONS_SET_ENABLED_CHANNEL,
+  payload: BrowserExtensionSetEnabledInput,
+  result: Schema.Array(BrowserExtension),
+  handler: Effect.fn("desktop.ipc.preview.setBrowserExtensionEnabled")(function* (input) {
+    const extensions = yield* BrowserExtensions.BrowserExtensions;
+    return yield* extensions.setEnabled(input);
+  }),
+});
+
+export const removeBrowserExtension = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.PREVIEW_EXTENSIONS_REMOVE_CHANNEL,
+  payload: BrowserExtensionRemoveInput,
+  result: Schema.Array(BrowserExtension),
+  handler: Effect.fn("desktop.ipc.preview.removeBrowserExtension")(function* (input) {
+    const extensions = yield* BrowserExtensions.BrowserExtensions;
+    return yield* extensions.remove(input);
   }),
 });
 

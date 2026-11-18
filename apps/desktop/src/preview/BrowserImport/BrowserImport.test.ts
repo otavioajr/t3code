@@ -1,9 +1,12 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
 import * as HostProcess from "@t3tools/shared/HostProcess";
+import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as SqlClient from "effect/sql/SqlClient";
+import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 
 import * as BrowserSession from "../BrowserSession.ts";
 import { readManagedPolicyFile } from "@t3tools/shared/managedPolicyFile";
@@ -32,6 +35,7 @@ const layerRejectedBeforeSession = Layer.succeed(
     getPartition: () => Effect.die("getPartition must not be reached"),
     isPartition: () => false,
     getSession: () => Effect.die("getSession must not be reached"),
+    setExtensions: () => Effect.die("setExtensions must not be reached"),
     clearCookies: () => Effect.die("clearCookies must not be reached"),
     cookiesCleared: () => Effect.die("cookiesCleared must not be reached"),
     clearCache: () => Effect.die("clearCache must not be reached"),
@@ -51,18 +55,18 @@ const withImporter = Effect.fnUntraced(function* () {
   yield* fileSystem.makeDirectory(`${root}/Default`, { recursive: true });
   yield* fileSystem.writeFileString(`${root}/Default/Cookies`, "db");
 
-  const importer = yield* BrowserImport.BrowserImport.pipe(
-    Effect.provide(
-      BrowserImport.layer.pipe(
-        Layer.provide(layerRejectedBeforeSession),
-        Layer.provide(DesktopManagedPolicy.layerTest()),
-        Layer.provide(layerEnvironment),
-        Layer.provide(Layer.succeed(HostProcess.Platform, "darwin")),
-        Layer.provide(Layer.succeed(HostProcess.ExecutablePath, "/Applications/T3 Code.app")),
-        Layer.provide(NodeServices.layer),
-      ),
+  // Build in the test's scope: the importer owns a temp directory that closes with its layer.
+  const services = yield* Layer.build(
+    BrowserImport.layer.pipe(
+      Layer.provide(layerRejectedBeforeSession),
+      Layer.provide(DesktopManagedPolicy.layerTest()),
+      Layer.provide(layerEnvironment),
+      Layer.provide(Layer.succeed(HostProcess.Platform, "darwin")),
+      Layer.provide(Layer.succeed(HostProcess.ExecutablePath, "/Applications/T3 Code.app")),
+      Layer.provide(NodeServices.layer),
     ),
   );
+  const importer = Context.get(services, BrowserImport.BrowserImport);
   return { importer, home, root };
 });
 
@@ -118,12 +122,64 @@ describe("BrowserImport.importCookies", () => {
   );
 });
 
+describe("BrowserImport history suggestions", () => {
+  it.effect("lists a running browser's profiles and searches only a profile it listed", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const { importer, home, root } = yield* withImporter();
+      const history = `${root}/Default/History`;
+      yield* Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        yield* sql`create table urls (id integer primary key, url longvarchar, title longvarchar,
+          visit_count integer, last_visit_time integer, hidden integer)`;
+        yield* sql`insert into urls (url, title, visit_count, last_visit_time, hidden)
+          values ('https://listed.test/', 'Listed', 2, 13300000000000000, 0)`;
+      }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: history })));
+
+      const sources = yield* importer.listHistorySources;
+      assert.deepEqual(sources.find((source) => source.id === "helium")?.profiles, [
+        { directory: "Default", name: "Default" },
+      ]);
+      assert.equal(sources.find((source) => source.id === "chrome")?.unavailable, "notInstalled");
+      assert.isUndefined(sources.find((source) => source.id === "firefox"));
+
+      const found = yield* importer.searchHistory({
+        sourceId: "helium",
+        sourceProfileDirectory: "Default",
+        query: "listed",
+      });
+      assert.deepEqual(
+        found.map((row) => row.url),
+        ["https://listed.test/"],
+      );
+
+      yield* fileSystem.makeDirectory(`${home}/secrets`, { recursive: true });
+      yield* fileSystem.copyFile(history, `${home}/secrets/History`);
+      const error = yield* importer
+        .searchHistory({
+          sourceId: "helium",
+          sourceProfileDirectory: "../../../../secrets",
+          query: "listed",
+        })
+        .pipe(Effect.flip);
+      assert.instanceOf(error, BrowserImport.BrowserImportFailedError);
+      assert.equal(error.reason, "unknownSourceProfile");
+
+      const unsupported = yield* importer
+        .searchHistory({ sourceId: "firefox", sourceProfileDirectory: "Default", query: "x" })
+        .pipe(Effect.flip);
+      assert.instanceOf(unsupported, BrowserImport.BrowserImportFailedError);
+      assert.equal(unsupported.reason, "unknownSource");
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+  );
+});
+
 describe("BrowserImport.checkBrowserImportPolicy", () => {
   it.effect("allows imports unless a readable policy turns them off, and fails closed", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const dir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3code-import-policy-" });
-      const outcome = (contents: string | undefined) =>
+      const outcome = (contents: string | undefined, action?: string) =>
         Effect.gen(function* () {
           const policyPath = `${dir}/policy.json`;
           yield* fileSystem.remove(policyPath, { force: true });
@@ -131,7 +187,7 @@ describe("BrowserImport.checkBrowserImportPolicy", () => {
           const readPolicy = readManagedPolicyFile(policyPath).pipe(
             Effect.map((document) => document && { source: policyPath, document }),
           );
-          return yield* BrowserImport.checkBrowserImportPolicy(readPolicy).pipe(
+          return yield* BrowserImport.checkBrowserImportPolicy(readPolicy, action).pipe(
             Effect.match({ onFailure: (error) => error.message, onSuccess: () => "allowed" }),
           );
         });
@@ -144,6 +200,13 @@ describe("BrowserImport.checkBrowserImportPolicy", () => {
       assert.equal(
         yield* outcome(policy({ browserCookieImport: false })),
         "Example Corp's policy does not allow importing browser cookies.",
+      );
+      assert.equal(
+        yield* outcome(
+          policy({ browserCookieImport: false }),
+          "suggesting pages from browser history",
+        ),
+        "Example Corp's policy does not allow suggesting pages from browser history.",
       );
       for (const unreadable of ["{ not json", policy({ notALimit: false })]) {
         assert.include(yield* outcome(unreadable), "could not be read");
