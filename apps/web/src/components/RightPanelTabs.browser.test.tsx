@@ -1,11 +1,17 @@
 import "~/index.css";
 
-import { EnvironmentId } from "@t3tools/contracts";
+import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { describe, expect, it, vi } from "vite-plus/test";
-import { userEvent } from "vite-plus/test/browser";
+import { page, userEvent } from "vite-plus/test/browser";
 
 import { InputGroup, InputGroupAddon, InputGroupInput } from "~/components/ui/input-group";
-import type { RightPanelSurface } from "~/rightPanelStore";
+import {
+  type RightPanelSurface,
+  selectThreadRightPanelLayout,
+  selectThreadRightPanelState,
+  useRightPanelStore,
+} from "~/rightPanelStore";
 import { render, stubGlobal } from "../../test/render";
 import { HistorySwipeNavigation } from "./HistorySwipeNavigation";
 import { RightPanelTabs, type RightPanelTabsProps } from "./RightPanelTabs";
@@ -286,5 +292,118 @@ describe("device tab rename", () => {
     await userEvent.fill(input, "日本語");
     await userEvent.keyboard("{Enter}");
     expect(onRenameSurface).toHaveBeenCalledExactlyOnceWith(DEVICE_SURFACE.id, "日本語");
+  });
+});
+
+const GROUP_REF = scopeThreadRef(EnvironmentId.make("environment-local"), ThreadId.make("grouped"));
+
+function GroupedPanel(props: { width: number }) {
+  const thread = useRightPanelStore((state) =>
+    selectThreadRightPanelState(state.byThreadKey, GROUP_REF),
+  );
+  const layout = useRightPanelStore((state) => selectThreadRightPanelLayout(state, GROUP_REF));
+  const store = useRightPanelStore.getState;
+  const base = panel(DIFF_SURFACE).props as RightPanelTabsProps;
+  return (
+    <div style={{ display: "flex", width: props.width, height: 500 }}>
+      <RightPanelTabs
+        {...base}
+        mode="sheet"
+        surfaces={thread.surfaces}
+        activeSurfaceId={thread.activeSurfaceId}
+        onActivate={(surface) => store().activateSurface(GROUP_REF, surface.id)}
+        onMoveSurface={(surfaceId, toIndex) => store().moveSurface(GROUP_REF, surfaceId, toIndex)}
+        groups={{
+          layout,
+          maximizedGroupId: null,
+          renderSurface: (surface) => (
+            <div data-testid={`content-${surface.id}`} className="size-full" />
+          ),
+          onFocusGroup: (groupId) => store().focusGroup(GROUP_REF, groupId),
+          onMoveSurfaceTo: (surfaceId, target) =>
+            store().moveSurfaceTo(GROUP_REF, surfaceId, target),
+          onResizeColumns: (sizes) => store().resizeColumns(GROUP_REF, sizes),
+          onResizeGroups: (columnId, sizes) => store().resizeGroups(GROUP_REF, columnId, sizes),
+          onToggleGroupMaximized: (groupId) => store().toggleGroupMaximized(GROUP_REF, groupId),
+          onMinimizeGroup: (groupId) => store().minimizeGroup(GROUP_REF, groupId),
+          onCloseGroup: (groupId) => store().closeGroup(GROUP_REF, groupId),
+        }}
+      />
+    </div>
+  );
+}
+
+function setupGroupedPanel() {
+  useRightPanelStore.setState({ byThreadKey: {}, layoutByThreadKey: {} });
+  useRightPanelStore.getState().open(GROUP_REF, "diff");
+  useRightPanelStore.getState().open(GROUP_REF, "files");
+}
+
+const groupLayout = () => selectThreadRightPanelLayout(useRightPanelStore.getState(), GROUP_REF);
+
+function pointer(type: string, target: Element, x: number, y: number) {
+  target.dispatchEvent(
+    new PointerEvent(type, {
+      bubbles: true,
+      cancelable: true,
+      clientX: x,
+      clientY: y,
+      button: 0,
+      buttons: type === "pointerup" ? 0 : 1,
+      pointerId: 1,
+      isPrimary: true,
+    }),
+  );
+}
+
+describe("right panel groups", () => {
+  it("drags a tab to a group's right edge, showing the drop zone, into a new column", async () => {
+    setupGroupedPanel();
+    // A viewport change would fire the resize that cancels a drag, so this fits the default one.
+    await using screen = await render(<GroupedPanel width={400} />);
+    const tab = screen.getByText("Files").element().closest("[data-active-tab]")!;
+    const content = document.querySelector("[data-right-panel-surface-content]")!;
+    const tabRect = tab.getBoundingClientRect();
+    const contentRect = content.getBoundingClientRect();
+    const startX = tabRect.x + tabRect.width / 2;
+    const startY = tabRect.y + tabRect.height / 2;
+    pointer("pointerdown", tab, startX, startY);
+    pointer("pointermove", tab, startX + 12, startY + 12);
+    const edgeX = contentRect.right - 10;
+    const midY = contentRect.y + contentRect.height / 2;
+    pointer("pointermove", tab, edgeX, midY);
+    await vi.waitFor(() =>
+      expect(document.querySelector('[data-right-panel-drop-indicator="right"]')).not.toBeNull(),
+    );
+    pointer("pointerup", tab, edgeX, midY);
+    await vi.waitFor(() =>
+      expect(groupLayout().columns.map((column) => column.groups[0]!.surfaceIds)).toEqual([
+        ["diff"],
+        ["files"],
+      ]),
+    );
+    expect(document.querySelector("[data-right-panel-drop-indicator]")).toBeNull();
+  });
+
+  it("resizes columns from the keyboard and focuses the group a pointer lands in", async () => {
+    setupGroupedPanel();
+    useRightPanelStore
+      .getState()
+      .moveSurfaceTo(GROUP_REF, "files", { kind: "column", groupId: "g1", side: "right" });
+    // Two columns need room above their minimum width to move.
+    await page.viewport(1200, 800);
+    await using screen = await render(<GroupedPanel width={900} />);
+    const divider = screen.getByRole("separator", { name: "Resize panel columns" });
+    (divider.element() as HTMLElement).focus();
+    await userEvent.keyboard("{ArrowRight}");
+    await vi.waitFor(() => {
+      const [left, right] = groupLayout().columns.map((column) => column.size);
+      expect(left!).toBeGreaterThan(right!);
+    });
+
+    expect(groupLayout().focusedGroupId).toBe("g2");
+    const diffContent = screen.getByTestId("content-diff").element();
+    pointer("pointerdown", diffContent, 10, 10);
+    await vi.waitFor(() => expect(groupLayout().focusedGroupId).toBe("g1"));
   });
 });

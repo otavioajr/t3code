@@ -19,8 +19,8 @@ import { useOrchestrationCommand } from "../../state/use-orchestration-command";
 
 /**
  * Starts side chats from `threadRef`, or offers none when it is null. `open` forks the
- * thread's latest stable point, sends `prompt` there with `readSettings()`, the parent
- * composer's settings, and shows the tab. It resolves false when the side chat did not
+ * thread's latest stable point, sends `prompt` there with `readSettings()` (the side chat
+ * model setting, else the parent composer's), and shows the tab. It resolves false when the side chat did not
  * start, or another one is still starting.
  */
 export function useSideChat(input: {

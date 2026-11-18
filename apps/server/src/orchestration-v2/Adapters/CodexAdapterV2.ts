@@ -64,6 +64,7 @@ import type {
   OrchestrationV2ProviderCapabilities,
   OrchestrationV2ProviderFailure,
   OrchestrationV2ProviderRetry,
+  OrchestrationV2ProviderMcpServer,
   OrchestrationV2ProviderSession,
   OrchestrationV2ProviderThread,
   OrchestrationV2ProviderTurn,
@@ -1446,6 +1447,32 @@ const CODEX_T3_MCP_TOOL_TIMEOUT_SEC = 65 * 60;
 // Holds T3 tools Codex must call directly, never from Code Mode. Calls arrive as
 // `t3-code-direct.<tool>`; t3McpToolPresentation.ts must keep resolving that form.
 const CODEX_T3_DIRECT_MCP_SERVER = "t3-code-direct";
+const CODEX_T3_MCP_SERVERS = new Set(["t3-code", CODEX_T3_DIRECT_MCP_SERVER]);
+
+/** Folds one MCP startup notification into the session's list; undefined when nothing changes. */
+export function nextCodexMcpServers(
+  current: ReadonlyArray<OrchestrationV2ProviderMcpServer>,
+  update: {
+    readonly name: string;
+    readonly status: "starting" | "ready" | "failed" | "cancelled";
+    readonly failureReason?: "reauthenticationRequired" | null;
+  },
+): ReadonlyArray<OrchestrationV2ProviderMcpServer> | undefined {
+  const name = update.name.trim().slice(0, 256);
+  if (name.length === 0 || CODEX_T3_MCP_SERVERS.has(name)) return undefined;
+  const status: OrchestrationV2ProviderMcpServer["status"] =
+    update.status === "ready"
+      ? "connected"
+      : update.status === "starting"
+        ? "pending"
+        : update.failureReason === "reauthenticationRequired"
+          ? "needs_auth"
+          : "failed";
+  const index = current.findIndex((server) => server.name === name);
+  if (index === -1) return current.length >= 64 ? undefined : [...current, { name, status }];
+  if (current[index]!.status === status) return undefined;
+  return current.map((server, at) => (at === index ? { name, status } : server));
+}
 const CODEX_DIRECT_ONLY_T3_TOOL = "t3_thread_wait";
 
 function codexThreadRuntimeParams(input: {
@@ -2033,6 +2060,8 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
         const activeTurns = yield* Ref.make(new Map<string, ActiveCodexTurnContext>());
         // Codex reports MCP startup on thread start, usually before the turn context exists.
         const mcpStartupFailures = new Map<string, Map<string, string>>();
+        // Delegated threads share this app-server, so its servers are tracked per session.
+        let mcpServers: ReadonlyArray<OrchestrationV2ProviderMcpServer> = [];
         const turnTokenUsageByThread = new Map<string, CodexTurnTokenUsageState>();
         const usageStateForThread = (nativeThreadId: string) => {
           let state = turnTokenUsageByThread.get(nativeThreadId);
@@ -4969,6 +4998,19 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
 
         yield* client.handleServerNotification("mcpServer/startupStatus/updated", (payload) =>
           Effect.gen(function* () {
+            const nextMcpServers = nextCodexMcpServers(mcpServers, payload);
+            if (nextMcpServers !== undefined) {
+              mcpServers = nextMcpServers;
+              yield* emitProviderEvent({
+                type: "provider_session.updated",
+                driver: CODEX_PROVIDER,
+                providerSession: {
+                  ...session,
+                  mcpServers: nextMcpServers,
+                  updatedAt: yield* DateTime.now,
+                },
+              });
+            }
             if (payload.threadId == null) return;
             const failures = mcpStartupFailures.get(payload.threadId) ?? new Map<string, string>();
             if (payload.status === "failed") {

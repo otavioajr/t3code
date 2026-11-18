@@ -90,14 +90,7 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
     targets.length > 0 &&
     targets.every((candidate) => candidate.settings.defaultModelSelection === null);
   const mixedFallback = useScopedSettingsMixed(["fallbackModelSelection"]);
-  const fallbackSelection = settings.fallbackModelSelection ?? selection;
-  const fallbackEntry = entries.find((entry) => entry.instanceId === fallbackSelection?.instanceId);
-  const fallbackModelOptions = getCustomModelOptionsByInstance(
-    settings,
-    providers,
-    fallbackSelection?.instanceId,
-    fallbackSelection?.model,
-  );
+  const mixedSideChatModel = useScopedSettingsMixed(["sideChatModelSelection"]);
   const mixedPermissions = useScopedSettingsMixed(["defaultRuntimeMode"]);
   const PermissionIcon = runtimeModeConfig[settings.defaultRuntimeMode].icon;
   const mixedWorkspace = useScopedSettingsMixed(["defaultThreadEnvMode"]);
@@ -246,85 +239,115 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
     />
   );
 
-  const fallbackRow = !isProjectScope ? (
-    <SettingsRow
-      serverScoped
-      settingKeys={["fallbackModelSelection"]}
-      mixed={mixedFallback}
-      {...searchableSetting("fallback-model")}
-      description="Used for new threads when the default model's provider is out of usage."
-      resetAction={
-        mixedFallback || settings.fallbackModelSelection !== null ? (
-          <SettingResetButton
-            label="fallback model"
-            onClick={() => updateSettings({ fallbackModelSelection: null })}
-          />
-        ) : null
-      }
-      control={
-        fallbackSelection ? (
-          <div className="flex min-w-0 flex-wrap items-center justify-end gap-1.5">
-            <ProviderModelPicker
-              environmentId={representative?.environmentId ?? null}
-              activeInstanceId={fallbackSelection.instanceId}
-              model={fallbackSelection.model}
-              lockedProvider={null}
-              instanceEntries={entries}
-              modelOptionsByInstance={fallbackModelOptions}
-              triggerClassName={SETTINGS_PICKER_TRIGGER_CLASSNAME}
-              triggerAriaLabel="Fallback model"
-              {...(mixedFallback
-                ? { triggerLabel: "Mixed" }
-                : settings.fallbackModelSelection === null
-                  ? { triggerLabel: "None" }
-                  : {})}
-              getModelDisabledReason={modelDisabledReason}
-              onInstanceModelChange={(instanceId, model) => {
-                const reason = modelDisabledReason(instanceId, model);
-                if (reason) {
-                  toastManager.add({
-                    type: "error",
-                    title: "Fallback model not saved",
-                    description: reason,
-                  });
-                  return;
-                }
-                updateSettings({
-                  fallbackModelSelection: pickModelSelection(
-                    mixedFallback ? null : settings.fallbackModelSelection,
-                    instanceId,
-                    model,
-                  ),
-                });
-              }}
+  // An optional model that is unset until picked; the picker starts from the default model.
+  const optionalModelRow = (row: {
+    readonly key: "fallbackModelSelection" | "sideChatModelSelection";
+    readonly searchId: "fallback-model" | "side-chat-model";
+    readonly label: string;
+    readonly unsetLabel: string;
+    readonly description: string;
+    readonly mixed: boolean;
+  }) => {
+    const stored = settings[row.key];
+    const shown = stored ?? selection;
+    const shownEntry = entries.find((entry) => entry.instanceId === shown?.instanceId);
+    return (
+      <SettingsRow
+        serverScoped
+        settingKeys={[row.key]}
+        mixed={row.mixed}
+        {...searchableSetting(row.searchId)}
+        description={row.description}
+        resetAction={
+          row.mixed || stored !== null ? (
+            <SettingResetButton
+              label={row.label.toLowerCase()}
+              onClick={() => updateSettings({ [row.key]: null })}
             />
-            {settings.fallbackModelSelection !== null && fallbackEntry && !mixedFallback ? (
-              <TraitsPicker
-                provider={fallbackEntry.driverKind}
-                models={fallbackEntry.models}
-                model={fallbackSelection.model}
-                modelOptions={fallbackSelection.options ?? []}
-                allowPromptInjectedEffort={false}
-                planModeEnabled={settings.planModeEnabled}
+          ) : null
+        }
+        control={
+          shown ? (
+            <div className="flex min-w-0 flex-wrap items-center justify-end gap-1.5">
+              <ProviderModelPicker
+                environmentId={representative?.environmentId ?? null}
+                activeInstanceId={shown.instanceId}
+                model={shown.model}
+                lockedProvider={null}
+                instanceEntries={entries}
+                modelOptionsByInstance={getCustomModelOptionsByInstance(
+                  settings,
+                  providers,
+                  shown.instanceId,
+                  shown.model,
+                )}
                 triggerClassName={SETTINGS_PICKER_TRIGGER_CLASSNAME}
-                onModelOptionsChange={(options) =>
+                triggerAriaLabel={row.label}
+                {...(row.mixed
+                  ? { triggerLabel: "Mixed" }
+                  : stored === null
+                    ? { triggerLabel: row.unsetLabel }
+                    : {})}
+                getModelDisabledReason={modelDisabledReason}
+                onInstanceModelChange={(instanceId, model) => {
+                  const reason = modelDisabledReason(instanceId, model);
+                  if (reason) {
+                    toastManager.add({
+                      type: "error",
+                      title: `${row.label} not saved`,
+                      description: reason,
+                    });
+                    return;
+                  }
                   updateSettings({
-                    fallbackModelSelection: createModelSelection(
-                      fallbackSelection.instanceId,
-                      fallbackSelection.model,
-                      options,
-                    ),
-                  })
-                }
+                    [row.key]: pickModelSelection(row.mixed ? null : stored, instanceId, model),
+                  });
+                }}
               />
-            ) : null}
-          </div>
-        ) : (
-          <span className="text-sm text-muted-foreground">No providers available</span>
-        )
-      }
-    />
-  ) : null;
+              {stored !== null && shownEntry && !row.mixed ? (
+                <TraitsPicker
+                  provider={shownEntry.driverKind}
+                  models={shownEntry.models}
+                  model={shown.model}
+                  modelOptions={shown.options ?? []}
+                  allowPromptInjectedEffort={false}
+                  planModeEnabled={settings.planModeEnabled}
+                  triggerClassName={SETTINGS_PICKER_TRIGGER_CLASSNAME}
+                  onModelOptionsChange={(options) =>
+                    updateSettings({
+                      [row.key]: createModelSelection(shown.instanceId, shown.model, options),
+                    })
+                  }
+                />
+              ) : null}
+            </div>
+          ) : (
+            <span className="text-sm text-muted-foreground">No providers available</span>
+          )
+        }
+      />
+    );
+  };
+  const fallbackRow = !isProjectScope
+    ? optionalModelRow({
+        key: "fallbackModelSelection",
+        searchId: "fallback-model",
+        label: "Fallback model",
+        unsetLabel: "None",
+        description: "Used for new threads when the default model's provider is out of usage.",
+        mixed: mixedFallback,
+      })
+    : null;
+  const sideChatModelRow = !isProjectScope
+    ? optionalModelRow({
+        key: "sideChatModelSelection",
+        searchId: "side-chat-model",
+        label: "Side chat model",
+        unsetLabel: "Same as thread",
+        description: "Used for new side chats. By default they use their thread's model.",
+        mixed: mixedSideChatModel,
+      })
+    : null;
 
   return (
     <SettingsSection
@@ -335,12 +358,14 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
         <>
           {modelRow}
           {fallbackRow}
+          {sideChatModelRow}
           {workspaceRow}
         </>
       ) : category === "general" ? (
         <>
           {modelRow}
           {fallbackRow}
+          {sideChatModelRow}
           <SettingsRow
             serverScoped
             settingKeys={["defaultRuntimeMode"]}

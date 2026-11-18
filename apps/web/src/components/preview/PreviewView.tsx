@@ -66,6 +66,7 @@ import { primaryServerKeybindingsAtom } from "~/state/server";
 import { PreviewAnnotationSpeech } from "./PreviewAnnotationSpeech";
 import { previewBridge } from "./previewBridge";
 import { subscribePreviewAction } from "./previewActionBus";
+import { useChatPane } from "../../splitView/chatPane";
 import { closePreviewSession } from "./closePreviewSession";
 import { openPreviewSession } from "./openPreviewSession";
 import { showPreviewPopup } from "./showPreviewPopup";
@@ -913,6 +914,8 @@ export function PreviewView({
   }, [runtimeTabId]);
 
   // Subscribe only while visible; ChatView always owns URL-aware toggle-panel handling.
+  // Window-wide preview actions belong to the focused split pane's preview.
+  const paneUnfocused = useChatPane()?.focused === false;
   const onPreviewAction = useEffectEvent(
     (action: Parameters<Parameters<typeof subscribePreviewAction>[0]>[0]) => {
       switch (action) {
@@ -947,7 +950,7 @@ export function PreviewView({
   );
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- subscribes to preview and desktop menu actions while the view is visible
   useEffect(() => {
-    if (!visible) return;
+    if (!visible || paneUnfocused) return;
     const unsubscribeAction = subscribePreviewAction((action) => onPreviewAction(action));
     // A focused page swallows its own keydowns, so the desktop forwards these
     // shortcuts from the guest as menu actions instead.
@@ -962,7 +965,7 @@ export function PreviewView({
       unsubscribeAction();
       unsubscribeMenu?.();
     };
-  }, [visible]);
+  }, [paneUnfocused, visible]);
 
   return (
     <div

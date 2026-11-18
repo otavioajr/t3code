@@ -2782,6 +2782,20 @@ describe("CodexAdapterV2 post-settle continuation", () => {
         const startup: Array<CodexReplay.CodexAppServerReplayEntry> = [
           {
             type: "emit_inbound",
+            label: "t3-mcp-ready",
+            frame: {
+              method: "mcpServer/startupStatus/updated",
+              params: {
+                threadId: nativeThreadId,
+                name: "t3-code",
+                status: "ready",
+                error: null,
+                failureReason: null,
+              },
+            },
+          },
+          {
+            type: "emit_inbound",
             label: "mcp-starting",
             frame: {
               method: "mcpServer/startupStatus/updated",
@@ -2852,6 +2866,13 @@ describe("CodexAdapterV2 post-settle continuation", () => {
           return serialized.includes("example_mcp") && serialized.includes("failed to start");
         });
         assert.isNotEmpty(surfaced);
+        const sessions = harness.events.flatMap((event) =>
+          event.type === "provider_session.updated" ? [event.providerSession.mcpServers] : [],
+        );
+        assert.deepEqual(sessions, [
+          [{ name: "example_mcp", status: "pending" }],
+          [{ name: "example_mcp", status: "failed" }],
+        ]);
       }).pipe(
         Effect.provide(
           Layer.mergeAll(
@@ -2863,6 +2884,32 @@ describe("CodexAdapterV2 post-settle continuation", () => {
         ),
       ),
   );
+
+  it("folds MCP startup updates into the session's server list", () => {
+    const github = { name: "github", status: "connected" as const };
+    assert.deepEqual(
+      CodexAdapterV2.nextCodexMcpServers([], { name: " github ", status: "ready" }),
+      [github],
+    );
+    assert.isUndefined(
+      CodexAdapterV2.nextCodexMcpServers([github], { name: "github", status: "ready" }),
+    );
+    assert.isUndefined(
+      CodexAdapterV2.nextCodexMcpServers([], { name: "t3-code-direct", status: "ready" }),
+    );
+    assert.deepEqual(
+      CodexAdapterV2.nextCodexMcpServers([github], {
+        name: "github",
+        status: "failed",
+        failureReason: "reauthenticationRequired",
+      }),
+      [{ name: "github", status: "needs_auth" }],
+    );
+    assert.deepEqual(
+      CodexAdapterV2.nextCodexMcpServers([github], { name: "linear", status: "cancelled" }),
+      [github, { name: "linear", status: "failed" }],
+    );
+  });
 
   it.effect("stops asking for commands the user allowed for the session", () =>
     Effect.gen(function* () {

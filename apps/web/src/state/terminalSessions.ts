@@ -238,3 +238,28 @@ export function useThreadRunningTerminalIds(input: {
   const sessions = useKnownTerminalSessions(input);
   return selectRunningSubprocessTerminalIds(sessions ?? []);
 }
+
+const observedTerminalOutputFamily = Atom.family((key: string) => {
+  const [environmentId, threadId, terminalId] = JSON.parse(key) as [
+    EnvironmentId,
+    ThreadId,
+    string,
+  ];
+  return Atom.make((get): TerminalSessionState["output"] | null => {
+    const session = get(environmentSession.sessionStateAtom(environmentId));
+    if (!sessionHasScope(session, AuthTerminalReadScope)) return null;
+    const observed = get(
+      terminalEnvironment.observe({ environmentId, input: { threadId, terminalId } }),
+    );
+    return AsyncResult.getOrElse(observed, () => EMPTY_TERMINAL_BUFFER_STATE).output;
+  }).pipe(Atom.withLabel(`web-terminal-observed:${key}`));
+});
+
+/** A running terminal's output, read-only: observing never starts or resizes a PTY. */
+export function observedTerminalOutputAtom(
+  environmentId: EnvironmentId,
+  threadId: ThreadId,
+  terminalId: string,
+): Atom.Atom<TerminalSessionState["output"] | null> {
+  return observedTerminalOutputFamily(JSON.stringify([environmentId, threadId, terminalId]));
+}

@@ -41,9 +41,9 @@ function makeThreadOverlayAtom<T>(label: string): ThreadOverlayAtom<T> {
     Atom.keepAlive,
     Atom.withLabel(`chat:${label}`),
   );
-  registerThreadOverlay((threadKey) => {
+  registerThreadOverlay((shownThreadKeys) => {
     const entry = appAtomRegistry.get(atom);
-    if (entry !== null && entry.threadKey !== threadKey) closeThreadOverlay(atom);
+    if (entry !== null && !shownThreadKeys.has(entry.threadKey)) closeThreadOverlay(atom);
   });
   return atom;
 }

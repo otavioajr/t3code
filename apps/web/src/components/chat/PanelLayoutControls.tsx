@@ -189,13 +189,10 @@ export function ThreadPanelHeaderControl(props: PanelLayoutControlsProps) {
   );
 }
 
-/** The window's top-right panel controls, with the maximize toggle while the panel is open. */
+/** The window's top-right panel controls; each panel group carries its own maximize toggle. */
 export function WorkspaceTitlebarControls(props: {
-  readonly showMaximizeControl: boolean;
   readonly rightPanelOpen: boolean;
-  readonly animationsActive: boolean;
   readonly maximized: boolean;
-  readonly onToggleMaximized: () => void;
   readonly children: ReactNode;
 }) {
   const { rightPanelOpen, maximized } = props;
@@ -230,27 +227,6 @@ export function WorkspaceTitlebarControls(props: {
       )}
       data-workspace-titlebar-controls
     >
-      {props.showMaximizeControl ? (
-        <span
-          aria-hidden={!props.rightPanelOpen}
-          // Fading out on close would show it beside the thread details toggle that replaces it.
-          className={cn(
-            "flex shrink-0",
-            props.rightPanelOpen &&
-              props.animationsActive &&
-              "motion-safe:transition-opacity motion-safe:duration-(--panel-animation-duration) motion-safe:ease-out",
-            props.rightPanelOpen
-              ? "pointer-events-auto opacity-100"
-              : "pointer-events-none absolute right-full mr-1 opacity-0",
-          )}
-          inert={!props.rightPanelOpen}
-        >
-          <RightPanelMaximizeControl
-            maximized={props.maximized}
-            onToggle={props.onToggleMaximized}
-          />
-        </span>
-      ) : null}
       <div className="pointer-events-auto flex h-full items-center">{props.children}</div>
     </div>
   );

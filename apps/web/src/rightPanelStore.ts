@@ -16,6 +16,24 @@ import { createJSONStorage, persist } from "zustand/middleware";
 import { useClosedViewStore } from "./closedViewStore";
 import { resolveStorage } from "./lib/storage";
 import type { ThreadPanelPresentation } from "./rightPanelLayout";
+import {
+  defaultRightPanelLayout,
+  EMPTY_RIGHT_PANEL_LAYOUT,
+  findRightPanelGroup,
+  focusRightPanelGroup,
+  minimizeRightPanelGroup,
+  moveRightPanelSurface,
+  parsePersistedRightPanelLayout,
+  reconcileRightPanelLayout,
+  reorderRightPanelSurface,
+  resizeRightPanelColumns,
+  resizeRightPanelGroups,
+  restoreRightPanelGroup,
+  rightPanelGroupSurfaceIds,
+  setRightPanelGroupActive,
+  type RightPanelDropTarget,
+  type RightPanelLayout,
+} from "./rightPanelLayoutModel";
 import type { ChatFileAttachment } from "./types";
 
 const RIGHT_PANEL_KINDS = [
@@ -91,7 +109,7 @@ export type RightPanelSurface =
   | { id: `side-chat:${string}`; kind: "side-chat"; threadId: ThreadId };
 
 const RIGHT_PANEL_STORAGE_KEY = "t3code:right-panel-state:v2";
-const RIGHT_PANEL_STORAGE_VERSION = 15;
+const RIGHT_PANEL_STORAGE_VERSION = 16;
 
 export const PULL_REQUESTS_PANEL_REF = scopeThreadRef(
   EnvironmentId.make("pull-requests-panel"),
@@ -116,6 +134,8 @@ export interface ThreadPanelVisibility {
 
 interface RightPanelStoreState {
   byThreadKey: Record<string, ThreadRightPanelState>;
+  /** Absent for a thread whose tabs still sit in the default single group. */
+  layoutByThreadKey: Record<string, RightPanelLayout>;
   pendingMaximizeThreadKey: string | null;
   requestMaximize: (ref: ScopedThreadRef) => void;
   consumeMaximizeRequest: (ref: ScopedThreadRef) => boolean;
@@ -188,8 +208,20 @@ interface RightPanelStoreState {
   closeSurface: (ref: ScopedThreadRef, surfaceId: string) => void;
   closeOtherSurfaces: (ref: ScopedThreadRef, surfaceId: string) => void;
   closeSurfacesToRight: (ref: ScopedThreadRef, surfaceId: string) => void;
-  closeAllSurfaces: (ref: ScopedThreadRef) => void;
+  /** With a group, closes only that group's tabs. */
+  closeAllSurfaces: (ref: ScopedThreadRef, groupId?: string) => void;
+  /** Reorders within the surface's own group. */
   moveSurface: (ref: ScopedThreadRef, surfaceId: string, toIndex: number) => void;
+  moveSurfaceTo: (ref: ScopedThreadRef, surfaceId: string, target: RightPanelDropTarget) => void;
+  focusGroup: (ref: ScopedThreadRef, groupId: string) => void;
+  resizeColumns: (ref: ScopedThreadRef, sizes: readonly number[]) => void;
+  resizeGroups: (ref: ScopedThreadRef, columnId: string, sizes: readonly number[]) => void;
+  toggleGroupMaximized: (ref: ScopedThreadRef, groupId: string) => void;
+  minimizeGroup: (ref: ScopedThreadRef, groupId: string) => void;
+  restoreGroup: (ref: ScopedThreadRef, groupId: string) => void;
+  /** Picks a minimized group's shown tab without restoring it. */
+  selectGroupSurface: (ref: ScopedThreadRef, groupId: string, surfaceId: string) => void;
+  closeGroup: (ref: ScopedThreadRef, groupId: string) => void;
   reconcileBrowserSurfaces: (
     ref: ScopedThreadRef,
     tabIds: readonly string[],
@@ -379,17 +411,93 @@ const updateThreadPanelVisibilityMap = (
 
 type RightPanelStoreData = Pick<
   RightPanelStoreState,
-  "byThreadKey" | "threadPanelVisibilityByThreadKey"
+  "byThreadKey" | "threadPanelVisibilityByThreadKey" | "layoutByThreadKey"
 >;
 
-const updateThread = (
+type LayoutUpdater = (
+  current: ThreadRightPanelState,
+  layout: RightPanelLayout,
+) => { thread: ThreadRightPanelState; layout: RightPanelLayout };
+
+const defaultLayoutCache = new WeakMap<ThreadRightPanelState, RightPanelLayout>();
+
+function layoutOf(
+  layoutByThreadKey: Record<string, RightPanelLayout>,
+  threadKey: string,
+  thread: ThreadRightPanelState,
+): RightPanelLayout {
+  const stored = layoutByThreadKey[threadKey];
+  if (stored) return stored;
+  if (thread.surfaces.length === 0) return EMPTY_RIGHT_PANEL_LAYOUT;
+  let layout = defaultLayoutCache.get(thread);
+  if (!layout) {
+    layout = defaultRightPanelLayout(
+      thread.surfaces.map((surface) => surface.id),
+      thread.activeSurfaceId,
+    );
+    defaultLayoutCache.set(thread, layout);
+  }
+  return layout;
+}
+
+/** Applies a registry edit and brings the thread's layout along with it. */
+function settleThread(
+  current: ThreadRightPanelState,
+  layout: RightPanelLayout,
+  next: ThreadRightPanelState,
+  nextLayout: RightPanelLayout,
+): { thread: ThreadRightPanelState; layout: RightPanelLayout } {
+  const reconciled = reconcileRightPanelLayout(nextLayout, {
+    previousIds: current.surfaces.map((surface) => surface.id),
+    previousActiveSurfaceId: current.activeSurfaceId,
+    nextIds: next.surfaces.map((surface) => surface.id),
+    nextActiveSurfaceId: next.activeSurfaceId,
+  });
+  let thread = next;
+  if (thread.activeSurfaceId !== reconciled.activeSurfaceId) {
+    thread = { ...thread, activeSurfaceId: reconciled.activeSurfaceId };
+  }
+  if (reconciled.restored && !thread.isOpen) thread = { ...thread, isOpen: true };
+  // A panel whose last shown group just went to a card closes; reopening it shows it empty.
+  if (
+    thread.isOpen &&
+    layout.columns.length > 0 &&
+    reconciled.layout.columns.length === 0 &&
+    reconciled.layout.minimized.length > 0
+  ) {
+    thread = { ...thread, isOpen: false };
+  }
+  if (thread.maximized && reconciled.layout.columns.length === 0) {
+    const { maximized: _maximized, ...rest } = thread;
+    thread = rest;
+  }
+  if (thread === next && reconciled.layout === layout && next === current) {
+    return { thread: current, layout };
+  }
+  return { thread, layout: reconciled.layout };
+}
+
+const updateThreadAndLayout = (
   state: RightPanelStoreData,
   threadKey: string,
-  updater: (current: ThreadRightPanelState) => ThreadRightPanelState,
+  updater: LayoutUpdater,
 ): RightPanelStoreData => {
   const current = state.byThreadKey[threadKey] ?? EMPTY_THREAD_STATE;
-  const byThreadKey = updateThreadStateMap(state.byThreadKey, threadKey, updater);
+  const layout = layoutOf(state.layoutByThreadKey, threadKey, current);
+  const proposed = updater(current, layout);
+  if (proposed.thread === current && proposed.layout === layout) return state;
+  const settled = settleThread(current, layout, proposed.thread, proposed.layout);
+  const byThreadKey = updateThreadStateMap(state.byThreadKey, threadKey, () => settled.thread);
   const next = byThreadKey[threadKey] ?? EMPTY_THREAD_STATE;
+  let layoutByThreadKey = state.layoutByThreadKey;
+  if (!(threadKey in byThreadKey) || settled.layout === EMPTY_RIGHT_PANEL_LAYOUT) {
+    if (threadKey in layoutByThreadKey) {
+      const { [threadKey]: _removed, ...rest } = layoutByThreadKey;
+      layoutByThreadKey = rest;
+    }
+  } else if (settled.layout !== layoutByThreadKey[threadKey]) {
+    layoutByThreadKey = { ...layoutByThreadKey, [threadKey]: settled.layout };
+  }
   let threadPanelVisibilityByThreadKey = state.threadPanelVisibilityByThreadKey;
 
   if (!current.isOpen && next.isOpen) {
@@ -409,13 +517,23 @@ const updateThread = (
     );
   }
 
-  return { byThreadKey, threadPanelVisibilityByThreadKey };
+  return { byThreadKey, threadPanelVisibilityByThreadKey, layoutByThreadKey };
 };
+
+const updateThread = (
+  state: RightPanelStoreData,
+  threadKey: string,
+  updater: (current: ThreadRightPanelState, layout: RightPanelLayout) => ThreadRightPanelState,
+): RightPanelStoreData =>
+  updateThreadAndLayout(state, threadKey, (current, layout) => ({
+    thread: updater(current, layout),
+    layout,
+  }));
 
 const automaticUpdate = (
   state: RightPanelStoreState,
   threadKey: string,
-  updater: (current: ThreadRightPanelState) => ThreadRightPanelState,
+  updater: ThreadUpdater,
 ): Partial<RightPanelStoreState> => ({
   ...updateThread(state, threadKey, updater),
 });
@@ -437,10 +555,36 @@ export function rightPanelHostRef(ref: ScopedThreadRef): ScopedThreadRef {
   return panelHosts.get(scopedThreadKey(ref)) ?? ref;
 }
 
+type ThreadUpdater = (
+  current: ThreadRightPanelState,
+  layout: RightPanelLayout,
+) => ThreadRightPanelState;
+
+const withFocusMirror = (thread: ThreadRightPanelState, layout: RightPanelLayout) => ({
+  thread,
+  layout,
+});
+
+/** A user's layout change on the panel that hosts `ref`. */
+const layoutAction = (
+  state: RightPanelStoreState,
+  ref: ScopedThreadRef,
+  updater: LayoutUpdater,
+): Partial<RightPanelStoreState> => {
+  const threadKey = scopedThreadKey(rightPanelHostRef(ref));
+  return {
+    ...updateThreadAndLayout(state, threadKey, updater),
+    userActionRevisionByThreadKey: {
+      ...state.userActionRevisionByThreadKey,
+      [threadKey]: (state.userActionRevisionByThreadKey[threadKey] ?? 0) + 1,
+    },
+  };
+};
+
 const userAction = (
   state: RightPanelStoreState,
   guestKey: string,
-  updater: (current: ThreadRightPanelState) => ThreadRightPanelState,
+  updater: ThreadUpdater,
   closesView = false,
 ): Partial<RightPanelStoreState> => {
   const host = panelHosts.get(guestKey);
@@ -451,11 +595,11 @@ const userAction = (
 const userActionOnThread = (
   state: RightPanelStoreState,
   threadKey: string,
-  updater: (current: ThreadRightPanelState) => ThreadRightPanelState,
+  updater: ThreadUpdater,
   closesView: boolean,
 ): Partial<RightPanelStoreState> => ({
-  ...updateThread(state, threadKey, (current) => {
-    const next = updater(current);
+  ...updateThread(state, threadKey, (current, layout) => {
+    const next = updater(current, layout);
     if (next === current) return current;
     const removedDevices = current.surfaces.filter(
       (surface) =>
@@ -494,7 +638,7 @@ const activated = (current: ThreadRightPanelState, surfaceId: string): ThreadRig
 const closeAction = (
   state: RightPanelStoreState,
   threadKey: string,
-  updater: (current: ThreadRightPanelState) => ThreadRightPanelState,
+  updater: ThreadUpdater,
 ): Partial<RightPanelStoreState> => userAction(state, threadKey, updater, true);
 
 function normalizeRevealLine(line: number | undefined): number | null {
@@ -502,9 +646,14 @@ function normalizeRevealLine(line: number | undefined): number | null {
   return Math.max(1, Math.trunc(line));
 }
 
+/**
+ * v15 and older kept one tab strip; their threads get no stored layout, which reads as one
+ * column holding one group of every tab with the same active tab.
+ */
 export function migratePersistedRightPanelState(persistedState: unknown): {
   byThreadKey: Record<string, ThreadRightPanelState>;
   threadPanelVisibilityByThreadKey: Record<string, ThreadPanelVisibility>;
+  layoutByThreadKey?: Record<string, RightPanelLayout>;
 } {
   if (!persistedState || typeof persistedState !== "object") {
     return { byThreadKey: {}, threadPanelVisibilityByThreadKey: {} };
@@ -658,13 +807,40 @@ export function migratePersistedRightPanelState(persistedState: unknown): {
           }),
         )
       : {};
-  return { byThreadKey, threadPanelVisibilityByThreadKey };
+  if (
+    !("layoutByThreadKey" in persistedState) ||
+    !persistedState.layoutByThreadKey ||
+    typeof persistedState.layoutByThreadKey !== "object"
+  ) {
+    return { byThreadKey, threadPanelVisibilityByThreadKey };
+  }
+  const layoutByThreadKey = Object.fromEntries(
+    Object.entries(persistedState.layoutByThreadKey as Record<string, unknown>).flatMap(
+      ([threadKey, value]) => {
+        const thread = byThreadKey[threadKey];
+        const layout = thread ? parsePersistedRightPanelLayout(value) : null;
+        if (!thread || !layout) return [];
+        const ids = thread.surfaces.map((surface) => surface.id);
+        const reconciled = reconcileRightPanelLayout(layout, {
+          previousIds: ids,
+          previousActiveSurfaceId: thread.activeSurfaceId,
+          nextIds: ids,
+          nextActiveSurfaceId: thread.activeSurfaceId,
+        });
+        return reconciled.layout.columns.length + reconciled.layout.minimized.length === 0
+          ? []
+          : [[threadKey, reconciled.layout]];
+      },
+    ),
+  );
+  return { byThreadKey, threadPanelVisibilityByThreadKey, layoutByThreadKey };
 }
 
 export const useRightPanelStore = create<RightPanelStoreState>()(
   persist(
     (set, get) => ({
       byThreadKey: {},
+      layoutByThreadKey: {},
       pendingMaximizeThreadKey: null,
       requestMaximize: (ref) => set({ pendingMaximizeThreadKey: scopedThreadKey(ref) }),
       consumeMaximizeRequest: (ref) => {
@@ -1031,23 +1207,28 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
         ),
       closeOtherSurfaces: (ref, surfaceId) =>
         set((state) =>
-          closeAction(state, scopedThreadKey(ref), (current) => {
+          closeAction(state, scopedThreadKey(ref), (current, layout) => {
             const surface = current.surfaces.find((entry) => entry.id === surfaceId);
-            if (!surface || current.surfaces.length === 1) return current;
+            const groupIds = new Set(rightPanelGroupSurfaceIds(layout, surfaceId));
+            if (!surface || groupIds.size <= 1) return current;
             return {
               ...current,
               isOpen: true,
-              surfaces: [surface],
+              surfaces: current.surfaces.filter(
+                (entry) => entry.id === surfaceId || !groupIds.has(entry.id),
+              ),
               activeSurfaceId: surface.id,
             };
           }),
         ),
       closeSurfacesToRight: (ref, surfaceId) =>
         set((state) =>
-          closeAction(state, scopedThreadKey(ref), (current) => {
-            const index = current.surfaces.findIndex((surface) => surface.id === surfaceId);
-            if (index < 0 || index === current.surfaces.length - 1) return current;
-            const surfaces = current.surfaces.slice(0, index + 1);
+          closeAction(state, scopedThreadKey(ref), (current, layout) => {
+            const groupIds = rightPanelGroupSurfaceIds(layout, surfaceId);
+            const index = groupIds.indexOf(surfaceId);
+            if (index < 0 || index === groupIds.length - 1) return current;
+            const closing = new Set(groupIds.slice(index + 1));
+            const surfaces = current.surfaces.filter((surface) => !closing.has(surface.id));
             const activeStillExists = surfaces.some(
               (surface) => surface.id === current.activeSurfaceId,
             );
@@ -1058,22 +1239,127 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
             };
           }),
         ),
-      closeAllSurfaces: (ref) =>
+      closeAllSurfaces: (ref, groupId) =>
         set((state) =>
-          closeAction(state, scopedThreadKey(ref), (current) =>
-            current.surfaces.length === 0
-              ? current
-              : { ...current, isOpen: false, surfaces: [], activeSurfaceId: null },
-          ),
+          closeAction(state, scopedThreadKey(ref), (current, layout) => {
+            if (current.surfaces.length === 0) return current;
+            const group = groupId === undefined ? null : findRightPanelGroup(layout, groupId);
+            if (group && layout.columns.flatMap((column) => column.groups).length > 1) {
+              const closing = new Set(group.surfaceIds);
+              return {
+                ...current,
+                surfaces: current.surfaces.filter((surface) => !closing.has(surface.id)),
+              };
+            }
+            return { ...current, isOpen: false, surfaces: [], activeSurfaceId: null };
+          }),
         ),
       moveSurface: (ref, surfaceId, toIndex) =>
         set((state) =>
-          updateThread(state, scopedThreadKey(ref), (current) => {
+          updateThreadAndLayout(state, scopedThreadKey(ref), (current, layout) => {
             const fromIndex = current.surfaces.findIndex((surface) => surface.id === surfaceId);
-            if (fromIndex < 0 || fromIndex === toIndex) return current;
+            if (fromIndex < 0) return { thread: current, layout };
+            const groupIds = rightPanelGroupSurfaceIds(layout, surfaceId);
+            const target = groupIds[Math.max(0, Math.min(toIndex, groupIds.length - 1))];
+            const targetIndex = current.surfaces.findIndex((surface) => surface.id === target);
             const surfaces = [...current.surfaces];
-            surfaces.splice(toIndex, 0, ...surfaces.splice(fromIndex, 1));
-            return { ...current, surfaces };
+            if (targetIndex >= 0 && targetIndex !== fromIndex) {
+              surfaces.splice(targetIndex, 0, ...surfaces.splice(fromIndex, 1));
+            }
+            return {
+              thread: targetIndex === fromIndex ? current : { ...current, surfaces },
+              layout: reorderRightPanelSurface(layout, surfaceId, toIndex),
+            };
+          }),
+        ),
+      moveSurfaceTo: (ref, surfaceId, target) =>
+        set((state) =>
+          layoutAction(state, ref, (current, layout) => ({
+            thread: current,
+            layout: moveRightPanelSurface(layout, surfaceId, target),
+          })),
+        ),
+      focusGroup: (ref, groupId) =>
+        set((state) =>
+          updateThreadAndLayout(state, scopedThreadKey(rightPanelHostRef(ref)), (current, layout) =>
+            withFocusMirror(current, focusRightPanelGroup(layout, groupId)),
+          ),
+        ),
+      resizeColumns: (ref, sizes) =>
+        set((state) =>
+          updateThreadAndLayout(
+            state,
+            scopedThreadKey(rightPanelHostRef(ref)),
+            (current, layout) => ({
+              thread: current,
+              layout: resizeRightPanelColumns(layout, sizes),
+            }),
+          ),
+        ),
+      resizeGroups: (ref, columnId, sizes) =>
+        set((state) =>
+          updateThreadAndLayout(
+            state,
+            scopedThreadKey(rightPanelHostRef(ref)),
+            (current, layout) => ({
+              thread: current,
+              layout: resizeRightPanelGroups(layout, columnId, sizes),
+            }),
+          ),
+        ),
+      toggleGroupMaximized: (ref, groupId) =>
+        set((state) =>
+          updateThreadAndLayout(
+            state,
+            scopedThreadKey(rightPanelHostRef(ref)),
+            (current, layout) => {
+              if (!findRightPanelGroup(layout, groupId)) return { thread: current, layout };
+              const maximizedGroup = current.maximized
+                ? (layout.maximizedGroupId ?? layout.focusedGroupId)
+                : null;
+              if (maximizedGroup === groupId) {
+                const { maximized: _maximized, ...thread } = current;
+                const { maximizedGroupId: _group, ...rest } = layout;
+                return { thread, layout: rest };
+              }
+              return withFocusMirror(
+                { ...current, maximized: true },
+                { ...focusRightPanelGroup(layout, groupId), maximizedGroupId: groupId },
+              );
+            },
+          ),
+        ),
+      minimizeGroup: (ref, groupId) =>
+        set((state) =>
+          layoutAction(state, ref, (current, layout) =>
+            withFocusMirror(current, minimizeRightPanelGroup(layout, groupId, Date.now())),
+          ),
+        ),
+      restoreGroup: (ref, groupId) =>
+        set((state) =>
+          layoutAction(state, ref, (current, layout) => {
+            const restored = restoreRightPanelGroup(layout, groupId);
+            if (restored === layout) return { thread: current, layout };
+            return withFocusMirror({ ...current, isOpen: true }, restored);
+          }),
+        ),
+      selectGroupSurface: (ref, groupId, surfaceId) =>
+        set((state) =>
+          layoutAction(state, ref, (current, layout) =>
+            withFocusMirror(current, setRightPanelGroupActive(layout, groupId, surfaceId)),
+          ),
+        ),
+      closeGroup: (ref, groupId) =>
+        set((state) =>
+          closeAction(state, scopedThreadKey(ref), (current, layout) => {
+            const closing = new Set(
+              findRightPanelGroup(layout, groupId)?.surfaceIds ??
+                layout.minimized.find((entry) => entry.group.id === groupId)?.group.surfaceIds ??
+                [],
+            );
+            if (closing.size === 0) return current;
+            const surfaces = current.surfaces.filter((surface) => !closing.has(surface.id));
+            return { ...current, surfaces, isOpen: surfaces.length > 0 && current.isOpen };
           }),
         ),
       reconcileBrowserSurfaces: (ref, tabIds, hiddenTabIds) =>
@@ -1146,10 +1432,18 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
         ),
       setMaximized: (ref, maximized) =>
         set((state) =>
-          automaticUpdate(state, scopedThreadKey(ref), (current) => {
-            if ((current.maximized ?? false) === maximized) return current;
+          updateThreadAndLayout(state, scopedThreadKey(ref), (current, layout) => {
+            if ((current.maximized ?? false) === maximized) return { thread: current, layout };
             const { maximized: _maximized, ...rest } = current;
-            return maximized ? { ...rest, maximized: true } : rest;
+            const { maximizedGroupId: _group, ...unmaximized } = layout;
+            if (!maximized) return { thread: rest, layout: unmaximized };
+            return {
+              thread: { ...rest, maximized: true },
+              layout:
+                layout.focusedGroupId === null
+                  ? unmaximized
+                  : { ...layout, maximizedGroupId: layout.focusedGroupId },
+            };
           }),
         ),
       toggleVisibility: (ref) =>
@@ -1202,6 +1496,7 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
           const threadKey = scopedThreadKey(ref);
           if (
             !(threadKey in state.byThreadKey) &&
+            !(threadKey in state.layoutByThreadKey) &&
             !(threadKey in state.threadPanelVisibilityByThreadKey) &&
             !(threadKey in state.userActionRevisionByThreadKey) &&
             !(threadKey in state.closeRevisionByThreadKey)
@@ -1209,6 +1504,7 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
             return state;
           }
           const { [threadKey]: _removed, ...byThreadKey } = state.byThreadKey;
+          const { [threadKey]: _layout, ...layoutByThreadKey } = state.layoutByThreadKey;
           const { [threadKey]: _visibility, ...threadPanelVisibilityByThreadKey } =
             state.threadPanelVisibilityByThreadKey;
           const { [threadKey]: _revision, ...userActionRevisionByThreadKey } =
@@ -1217,6 +1513,7 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
             state.closeRevisionByThreadKey;
           return {
             byThreadKey,
+            layoutByThreadKey,
             threadPanelVisibilityByThreadKey,
             userActionRevisionByThreadKey,
             closeRevisionByThreadKey,
@@ -1240,6 +1537,11 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
                     { ...threadState, surfaces: threadState.surfaces.map(withoutReveal) },
                   ],
                 ],
+          ),
+        ),
+        layoutByThreadKey: Object.fromEntries(
+          Object.entries(state.layoutByThreadKey).filter(
+            ([threadKey]) => !isPullRequestsPanelKey(threadKey) && threadKey in state.byThreadKey,
           ),
         ),
         threadPanelVisibilityByThreadKey: Object.fromEntries(
@@ -1282,6 +1584,19 @@ export function selectThreadRightPanelState(
 ): ThreadRightPanelState {
   if (!ref) return EMPTY_THREAD_STATE;
   return byThreadKey[scopedThreadKey(ref)] ?? EMPTY_THREAD_STATE;
+}
+
+export function selectThreadRightPanelLayout(
+  state: Pick<RightPanelStoreState, "byThreadKey" | "layoutByThreadKey">,
+  ref: ScopedThreadRef | null | undefined,
+): RightPanelLayout {
+  if (!ref) return EMPTY_RIGHT_PANEL_LAYOUT;
+  const threadKey = scopedThreadKey(ref);
+  return layoutOf(
+    state.layoutByThreadKey,
+    threadKey,
+    state.byThreadKey[threadKey] ?? EMPTY_THREAD_STATE,
+  );
 }
 
 export function selectThreadPanelVisibility(

@@ -57,40 +57,56 @@ const PROVIDER_STARTING_RUN_STATUSES = new Set(["starting", "running"]);
 const EMPTY_EXTENSION_STATUSES: NonNullable<OrchestrationV2ProviderSession["extensionStatuses"]> =
   [];
 
-/** Only the selected provider's current session can supply transient extension status. */
-export function deriveProviderExtensionStatuses(
-  projection:
-    | (Pick<ThreadStructure, "thread"> & {
-        readonly providerThreads: ReadonlyArray<
-          Pick<
-            ThreadStructure["providerThreads"][number],
-            "id" | "providerSessionId" | "providerInstanceId"
-          >
-        >;
-        readonly providerSessions: ReadonlyArray<
-          Pick<
-            OrchestrationV2ProviderSession,
-            "id" | "providerInstanceId" | "status" | "extensionStatuses"
-          >
-        >;
-      })
-    | null,
-) {
-  if (projection === null) return EMPTY_EXTENSION_STATUSES;
+type ProviderSessionProjection<Session> =
+  | (Pick<ThreadStructure, "thread"> & {
+      readonly providerThreads: ReadonlyArray<
+        Pick<
+          ThreadStructure["providerThreads"][number],
+          "id" | "providerSessionId" | "providerInstanceId"
+        >
+      >;
+      readonly providerSessions: ReadonlyArray<Session>;
+    })
+  | null;
+
+/** The selected provider's current, unstopped session: the only one whose transient state applies. */
+function selectedProviderSession<
+  Session extends Pick<OrchestrationV2ProviderSession, "id" | "providerInstanceId" | "status">,
+>(projection: ProviderSessionProjection<Session>): Session | undefined {
+  if (projection === null) return undefined;
   const instanceId = projection.thread.modelSelection.instanceId;
   const activeThread = projection.providerThreads.find(
     (thread) => thread.id === projection.thread.activeProviderThreadId,
   );
   if (activeThread !== undefined && activeThread.providerInstanceId !== instanceId)
-    return EMPTY_EXTENSION_STATUSES;
+    return undefined;
   const session = projection.providerSessions.findLast(
     (session) =>
       session.providerInstanceId === instanceId &&
       (activeThread === undefined || session.id === activeThread.providerSessionId),
   );
-  return session === undefined || session.status === "stopped"
-    ? EMPTY_EXTENSION_STATUSES
-    : (session.extensionStatuses ?? EMPTY_EXTENSION_STATUSES);
+  return session?.status === "stopped" ? undefined : session;
+}
+
+export function deriveProviderExtensionStatuses(
+  projection: ProviderSessionProjection<
+    Pick<
+      OrchestrationV2ProviderSession,
+      "id" | "providerInstanceId" | "status" | "extensionStatuses"
+    >
+  >,
+) {
+  return selectedProviderSession(projection)?.extensionStatuses ?? EMPTY_EXTENSION_STATUSES;
+}
+
+/** Null when the provider does not report MCP servers or its session is not running. */
+export function deriveProviderMcpServers(
+  projection: ProviderSessionProjection<
+    Pick<OrchestrationV2ProviderSession, "id" | "providerInstanceId" | "status" | "mcpServers">
+  >,
+): NonNullable<OrchestrationV2ProviderSession["mcpServers"]> | null {
+  const session = selectedProviderSession(projection);
+  return session === undefined || session.status === "error" ? null : (session.mcpServers ?? null);
 }
 
 function latestMatchingRun(

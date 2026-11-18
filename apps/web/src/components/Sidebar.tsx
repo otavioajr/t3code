@@ -81,6 +81,7 @@ import {
   type ReactNode,
 } from "react";
 import { type AnyRouter, useRouter } from "@tanstack/react-router";
+import { openThreadInSplit } from "../splitView/splitViewStore";
 
 import {
   isAtomCommandInterrupted,
@@ -2629,6 +2630,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                 threadRef.environmentId,
                 AuthOrchestrationOperateScope,
               ),
+              canOpenToTheRight: true,
               branch: thread.branch ?? null,
               // An archived project is not a filter choice.
               projectFilter:
@@ -2677,6 +2679,11 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
           return;
         }
         switch (clicked.value) {
+          case "open-right":
+            if (!openThreadInSplit(router, { kind: "server", threadRef }, "right")) {
+              navigateToThread(threadRef);
+            }
+            return;
           case "filter-by-project":
             if (threadProjectGroup) {
               setProjectScopeKeys(

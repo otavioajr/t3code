@@ -984,6 +984,22 @@ export const OrchestrationV2CheckpointScope = Schema.Struct({
 });
 export type OrchestrationV2CheckpointScope = typeof OrchestrationV2CheckpointScope.Type;
 
+export const OrchestrationV2ProviderMcpServerStatus = Schema.Literals([
+  "connected",
+  "pending",
+  "needs_auth",
+  "failed",
+  "disabled",
+]);
+export type OrchestrationV2ProviderMcpServerStatus =
+  typeof OrchestrationV2ProviderMcpServerStatus.Type;
+
+export const OrchestrationV2ProviderMcpServer = Schema.Struct({
+  name: TrimmedNonEmptyString.check(Schema.isMaxLength(256)),
+  status: OrchestrationV2ProviderMcpServerStatus,
+});
+export type OrchestrationV2ProviderMcpServer = typeof OrchestrationV2ProviderMcpServer.Type;
+
 export const OrchestrationV2ProviderSession = Schema.Struct({
   id: ProviderSessionId,
   driver: ProviderDriverKind,
@@ -1000,6 +1016,10 @@ export const OrchestrationV2ProviderSession = Schema.Struct({
       }),
     ).check(Schema.isMaxLength(32)),
   ).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
+  // Absent when the provider does not report MCP servers; T3's own server is left out.
+  mcpServers: Schema.optional(
+    Schema.Array(OrchestrationV2ProviderMcpServer).check(Schema.isMaxLength(64)),
+  ),
   createdAt: Schema.DateTimeUtc,
   updatedAt: Schema.DateTimeUtc,
   lastError: Schema.NullOr(Schema.String),

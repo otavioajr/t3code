@@ -10,6 +10,11 @@ import { useEffect, useState } from "react";
 import ChatView from "./ChatView";
 import { BackgroundThreadContext } from "./chat/backgroundThread";
 import { SidebarInset } from "./ui/sidebar";
+import { SplitChatLayout } from "./splitView/SplitChatLayout";
+import { useChatPane } from "../splitView/chatPane";
+import { splitDropAreaProps } from "../splitView/splitDrop";
+import { isSplitActive } from "../splitView/splitViewModel";
+import { useSplitViewStore } from "../splitView/splitViewStore";
 import { useComposerDraftStore } from "../composerDraftStore";
 import { useSidebarPendingFileDropStore } from "../sidebarPendingFileDropStore";
 import {
@@ -57,6 +62,34 @@ export function ThreadRouteView({
 }: {
   target: ThreadRouteTarget;
   background?: boolean;
+}) {
+  const split = useSplitViewStore(isSplitActive);
+  if (split) return <SplitChatLayout routeTarget={target} background={background} />;
+  return (
+    <SidebarInset
+      className="h-svh min-h-0 overflow-hidden overscroll-y-none md:h-dvh"
+      inert={background}
+      {...splitDropAreaProps(null)}
+    >
+      <ThreadRouteContent target={target} background={background} />
+    </SidebarInset>
+  );
+}
+
+/**
+ * One thread's view. A split pane that does not show the route is `detached`: it never redirects
+ * or navigates, and shows `fallback` when its thread cannot open.
+ */
+export function ThreadRouteContent({
+  target,
+  background = false,
+  detached = false,
+  fallback = null,
+}: {
+  target: ThreadRouteTarget;
+  background?: boolean;
+  detached?: boolean;
+  fallback?: React.ReactNode;
 }) {
   const navigate = useNavigate();
   const draftId = target.kind === "draft" ? target.draftId : null;
@@ -148,11 +181,19 @@ export function ThreadRouteView({
     if (renderState === "missing") {
       const { clearPendingFileDropsForThread } = useSidebarPendingFileDropStore.getState();
       clearPendingFileDropsForThread(target.threadRef);
-      if (environmentHasAnyThreads && !background) {
+      if (environmentHasAnyThreads && !background && !detached) {
         void navigate({ to: "/", replace: true });
       }
     }
-  }, [background, bootstrapComplete, environmentHasAnyThreads, navigate, renderState, target]);
+  }, [
+    background,
+    bootstrapComplete,
+    detached,
+    environmentHasAnyThreads,
+    navigate,
+    renderState,
+    target,
+  ]);
 
   let view: React.ReactNode = null;
   let redirect: React.ReactNode = null;
@@ -224,13 +265,13 @@ export function ThreadRouteView({
     );
   }
 
+  const unfocusedPane = useChatPane()?.focused === false;
   return (
-    <SidebarInset
-      className="h-svh min-h-0 overflow-hidden overscroll-y-none md:h-dvh"
-      inert={background}
-    >
-      <BackgroundThreadContext value={background}>{view}</BackgroundThreadContext>
-      {background ? null : redirect}
-    </SidebarInset>
+    <>
+      <BackgroundThreadContext value={background || unfocusedPane}>
+        {view ?? (detached ? fallback : null)}
+      </BackgroundThreadContext>
+      {background || detached ? null : redirect}
+    </>
   );
 }

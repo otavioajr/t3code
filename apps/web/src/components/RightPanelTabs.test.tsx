@@ -2,7 +2,12 @@ import { EnvironmentId, type ThreadPullRequestLink } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  MINIMIZE_NEEDS_PAGE_REASON,
+  MINIMIZE_UNSUPPORTED_REASON,
   resolvePullRequestTabLink,
+  rightPanelDropTarget,
+  rightPanelDropZoneAt,
+  rightPanelMinimizeBlockedReason,
   surfaceShortcutActionForKey,
   surfaceShortcutTargetsTypingContext,
 } from "./RightPanelTabs";
@@ -165,5 +170,61 @@ describe("pull request tab snapshots", () => {
         link,
       ),
     ).toBe(newer);
+  });
+});
+
+describe("group drop targets", () => {
+  const rect = { left: 0, top: 0, width: 400, height: 200 };
+  it.each([
+    { x: 20, y: 100, zone: "left", target: { kind: "column", groupId: "g1", side: "left" } },
+    { x: 390, y: 100, zone: "right", target: { kind: "column", groupId: "g1", side: "right" } },
+    { x: 200, y: 10, zone: "top", target: { kind: "split", groupId: "g1", side: "above" } },
+    { x: 200, y: 190, zone: "bottom", target: { kind: "split", groupId: "g1", side: "below" } },
+    { x: 200, y: 100, zone: "center", target: { kind: "join", groupId: "g1" } },
+    // A corner goes to the nearer edge.
+    { x: 10, y: 45, zone: "left", target: { kind: "column", groupId: "g1", side: "left" } },
+  ] as const)("$zone at ($x, $y)", ({ x, y, zone, target }) => {
+    expect(rightPanelDropZoneAt(rect, x, y)).toBe(zone);
+    expect(rightPanelDropTarget({ groupId: "g1", zone })).toEqual(target);
+  });
+
+  it("joins a tab strip at the hovered index", () => {
+    expect(rightPanelDropTarget({ groupId: "g2", zone: "tabs", index: 1 })).toEqual({
+      kind: "join",
+      groupId: "g2",
+      index: 1,
+    });
+  });
+});
+
+describe("minimize rules", () => {
+  const browser = { id: "browser:tab-1", kind: "preview", resourceId: "tab-1" } as const;
+  const snapshot = (tag: "Idle" | "Success") =>
+    ({
+      "tab-1": {
+        navStatus:
+          tag === "Idle"
+            ? { _tag: "Idle" }
+            : { _tag: "Success", url: "https://a.test", title: "A" },
+      },
+    }) as unknown as Parameters<typeof rightPanelMinimizeBlockedReason>[2];
+  it.each([
+    {
+      name: "files",
+      surfaces: [{ id: "files", kind: "files" }],
+      reason: MINIMIZE_UNSUPPORTED_REASON,
+    },
+    { name: "diff", surfaces: [{ id: "diff", kind: "diff" }], reason: MINIMIZE_UNSUPPORTED_REASON },
+    {
+      name: "an unloaded browser",
+      surfaces: [browser],
+      sessions: "Idle",
+      reason: MINIMIZE_NEEDS_PAGE_REASON,
+    },
+    { name: "a loaded browser", surfaces: [browser], sessions: "Success", reason: null },
+  ] as const)("$name", ({ surfaces, sessions, reason }) => {
+    expect(
+      rightPanelMinimizeBlockedReason(surfaces, surfaces[0], sessions ? snapshot(sessions) : {}),
+    ).toBe(reason);
   });
 });

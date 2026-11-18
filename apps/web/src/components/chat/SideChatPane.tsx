@@ -12,7 +12,7 @@ import {
   type ThreadId,
 } from "@t3tools/contracts";
 import { Trash2Icon, XIcon } from "lucide-react";
-import { useEffect, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 
 import { useComposerDraftStore } from "../../composerDraftStore";
 import { ComposerHandleContext } from "../../composerHandleContext";
@@ -38,6 +38,7 @@ export default function SideChatPane(props: {
   readonly threadId: ThreadId;
   readonly parentPanel: SideChatParentPanel;
   readonly onClose: () => void;
+  readonly actions?: ReactNode;
 }) {
   const { parentRef, threadId } = props;
   const threadRef = scopeThreadRef(parentRef.environmentId, threadId);
@@ -158,6 +159,7 @@ export default function SideChatPane(props: {
         >
           <Trash2Icon />
         </Button>
+        {props.actions}
         <Button variant="ghost" size="icon-xs" aria-label="Close side chat" onClick={props.onClose}>
           <XIcon />
         </Button>

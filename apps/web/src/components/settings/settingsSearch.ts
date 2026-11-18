@@ -302,6 +302,14 @@ export const SETTINGS_SEARCH_ITEMS = [
     environmentOnly: true,
   },
   {
+    id: "side-chat-model",
+    title: "Side chat model",
+    to: "/settings/threads",
+    scope: "environment-defaults",
+    searchTerms: ["side chat question provider default model"],
+    environmentOnly: true,
+  },
+  {
     id: "default-permissions",
     title: "Permissions",
     to: "/settings/threads",

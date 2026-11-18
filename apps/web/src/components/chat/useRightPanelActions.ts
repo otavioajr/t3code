@@ -24,6 +24,7 @@ import { isBrowserSettingsReadError } from "../../browser/openFileInPreview";
 import { addBrowserSurface } from "../preview/addBrowserSurface";
 import { focusActivePanelTerminal, focusTerminal } from "../../lib/terminalFocus";
 import { subscribePreviewAction } from "../preview/previewActionBus";
+import { useChatPane } from "../../splitView/chatPane";
 import { floatDeviceSurface } from "../preview/agentOpenedPreviews";
 import { browserMiniPlayerSource, usePreviewMiniPlayerStore } from "../../previewMiniPlayerStore";
 import type { threadPullRequestPanelTarget } from "../pullRequest/pullRequestDetail.logic";
@@ -292,15 +293,16 @@ export function useRightPanelActions(input: RightPanelActionsInput) {
     onDiffPanelOpen?.();
   });
   const onOpenTurnDiffStable = useStableCallback(onOpenTurnDiff);
+  const paneUnfocused = useChatPane()?.focused === false;
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- subscribes to the preview action bus to toggle the preview panel
   useEffect(
     () =>
-      embedded
+      embedded || paneUnfocused
         ? undefined
         : subscribePreviewAction((action) => {
             if (action === "toggle-panel") togglePreviewPanelStable();
           }),
-    [embedded, togglePreviewPanelStable],
+    [embedded, paneUnfocused, togglePreviewPanelStable],
   );
 
   const shortcuts = {

@@ -110,6 +110,7 @@ import {
   type OrchestrationV2PlanStep,
   type OrchestrationV2PendingBackgroundTask,
   type OrchestrationV2ProviderRetry,
+  type OrchestrationV2ProviderMcpServer,
   type OrchestrationV2ProviderSession,
   type OrchestrationV2ProviderThread,
   type OrchestrationV2ProviderTurn,
@@ -2403,7 +2404,7 @@ export function claudeMcpQueryOverrides(input: {
   return {
     allowedTools: Array.from(new Set([...(input.allowedTools ?? []), ...mcpAllowedTools])),
     mcpServers: {
-      "t3-code": {
+      [CLAUDE_T3_MCP_SERVER]: {
         type: "http",
         url: session.endpoint,
         headers: {
@@ -2414,6 +2415,8 @@ export function claudeMcpQueryOverrides(input: {
     },
   };
 }
+
+const CLAUDE_T3_MCP_SERVER = "t3-code";
 
 function providerSession(input: {
   readonly providerSessionId: OrchestrationV2ProviderSession["id"];
@@ -2434,6 +2437,30 @@ function providerSession(input: {
     updatedAt: input.now,
     lastError: null,
   };
+}
+
+const CLAUDE_MCP_SERVER_STATUS: Readonly<
+  Record<string, OrchestrationV2ProviderMcpServer["status"]>
+> = {
+  connected: "connected",
+  pending: "pending",
+  "needs-auth": "needs_auth",
+  failed: "failed",
+  disabled: "disabled",
+};
+
+/** The init frame's MCP servers without T3's own, or undefined when the frame lists none. */
+function claudeMcpServers(
+  servers: ReadonlyArray<{ readonly name: string; readonly status: string }> | undefined,
+): ReadonlyArray<OrchestrationV2ProviderMcpServer> | undefined {
+  if (!Array.isArray(servers)) return undefined;
+  return servers
+    .flatMap((server) => {
+      const name = server.name.trim().slice(0, 256);
+      if (name.length === 0 || name === CLAUDE_T3_MCP_SERVER) return [];
+      return [{ name, status: CLAUDE_MCP_SERVER_STATUS[server.status] ?? "pending" }];
+    })
+    .slice(0, 64);
 }
 
 function textFromClaudeContent(content: SDKAssistantMessage["message"]["content"]): string {
@@ -6112,6 +6139,22 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           }
           return Queue.offer(events, event).pipe(Effect.asVoid);
         };
+
+        let reportedMcpServers: string | undefined;
+        const reportMcpServers = Effect.fnUntraced(function* (
+          servers: Extract<SDKMessage, { readonly subtype: "init" }>["mcp_servers"] | undefined,
+        ) {
+          const mcpServers = claudeMcpServers(servers);
+          if (mcpServers === undefined) return;
+          const key = mcpServers.map((server) => `${server.name}\u0000${server.status}`).join("\n");
+          if (key === reportedMcpServers) return;
+          reportedMcpServers = key;
+          yield* emitProviderEvent({
+            type: "provider_session.updated",
+            driver: CLAUDE_PROVIDER,
+            providerSession: { ...session, mcpServers, updatedAt: yield* DateTime.now },
+          });
+        });
 
         const persistAttachmentBudget = Effect.fnUntraced(function* (nativeThreadId: string) {
           const providerThread = (yield* Ref.get(lastProviderThreadByNativeThread)).get(
@@ -12603,7 +12646,10 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                       resultsReportingNewContextWindow.add(message);
                     }
                   }
-                  return handleSdkMessage({ query: querySession, message });
+                  const handled = handleSdkMessage({ query: querySession, message });
+                  return message.type === "system" && message.subtype === "init"
+                    ? Effect.andThen(reportMcpServers(message.mcp_servers), handled)
+                    : handled;
                 }),
               ),
             ),

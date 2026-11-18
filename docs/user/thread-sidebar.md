@@ -293,6 +293,10 @@ Select a server to open it in the browser panel. **Stop** ends the server's job
 and keeps the agent, the terminal, and T3 Code running. Stop needs terminal
 access to the environment and is not available on Windows.
 
+For Claude and Codex threads, **Connectors** shows how many of the agent's MCP
+servers are connected; expand it to see each server's status, such as one that
+needs you to sign in again. T3 Code's own server is not listed.
+
 To choose what the thread details card shows, right-click the card or open
 **Settings → Appearance → Thread details**. Hidden rows keep their keyboard
 shortcuts, such as Open in editor and project scripts. **Reset to default** brings
@@ -310,8 +314,10 @@ sidebar. Find one again under **Side chats** in thread details.
 
 A side chat works in the same folder as the thread and starts with the permissions,
 model, and reasoning level shown in the thread's composer, including for its first
-reply. Change them for an individual side chat in its composer. Later changes to the
-parent do not change existing side chats.
+reply. To start every side chat with one model instead, set **Side chat model** in
+**Settings > Threads**. Change the model for an individual side chat in its composer.
+Later changes to the parent do not change existing side chats. Side chats have no
+plan mode or advisor.
 
 To use what you learned, choose **Bring back**. The thread gets the side chat with
 your next message there. Bring back is available while the thread is idle.
@@ -322,6 +328,23 @@ side chats.
 
 On mobile, a thread lists its side chats above the composer. Tap one to open it and
 answer its questions.
+
+## Split view
+
+On web and desktop you can show up to four threads at once, side by side or stacked.
+Each pane is a full thread with its own composer and right panel.
+
+- Right-click a thread in the sidebar and choose **Open to the right**.
+- Drag a thread from the sidebar to the left, right, top, or bottom edge of the chat.
+- Run **New split right** or **New split below** from the command palette, or press
+  `Mod+\` or `Mod+Shift+\`. The new pane starts a new thread in the current project.
+
+The pane you last clicked has the keyboard. Picking a thread in the sidebar or the
+command palette opens it in that pane. Drag the line between panes to resize them.
+The split menu in a pane's header moves panes, moves focus between them, and holds the
+panel buttons a narrow pane hides. **✕** closes that pane; **Close split** returns to a
+single thread. Thread details open from the header while split. Bind the split commands
+in **Settings → Keybindings**.
 
 ## Snooze until later
 

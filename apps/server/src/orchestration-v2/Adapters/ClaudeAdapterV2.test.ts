@@ -3858,6 +3858,58 @@ describe("ClaudeAdapterV2 background wake turns", () => {
     ),
   );
 
+  it.effect("reports the init frame's MCP servers on the session without T3's own", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeWakeHarnessWithOptions({});
+      yield* harness.runtime.startTurn(
+        makeClaudeTestTurnInput({
+          threadId: harness.threadId,
+          providerThread: harness.providerThread,
+          now: DateTime.makeUnsafe(0),
+          attemptId: RunAttemptId.make("mcp-status"),
+          text: "List connectors",
+          attachments: [],
+          providerTurnOrdinal: 1,
+        }),
+      );
+      const init = claudeSdkFrame({
+        type: "system",
+        subtype: "init",
+        session_id: WAKE_NATIVE_SESSION,
+        uuid: "00000000-0000-4000-8000-000000000601",
+        mcp_servers: [
+          { name: "t3-code", status: "connected" },
+          { name: "github", status: "connected" },
+          { name: "claude.ai Linear", status: "needs-auth" },
+          { name: "broken", status: "failed" },
+        ],
+      });
+      yield* harness.offerAndWait(init);
+      yield* harness.offerAndWait(turnOneResult);
+      yield* Queue.take(harness.terminalReceipts);
+      const reported = harness.events.flatMap((event) =>
+        event.type === "provider_session.updated" ? [event.providerSession.mcpServers] : [],
+      );
+      assert.deepEqual(reported, [
+        [
+          { name: "github", status: "connected" },
+          { name: "claude.ai Linear", status: "needs_auth" },
+          { name: "broken", status: "failed" },
+        ],
+      ]);
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        Layer.mergeAll(
+          IdAllocator.layer,
+          McpProviderSessions.layer,
+          NodeServices.layer,
+          NodeCrypto.layer,
+        ),
+      ),
+    ),
+  );
+
   it.effect.each(["release-after", "cancel-after", "release-before", "resume-pending"] as const)(
     "keeps attachment reservations across compaction: %s boundary",
     (outcome) =>
