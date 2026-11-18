@@ -1,6 +1,8 @@
 import type { EnvironmentId, ScopedThreadRef } from "@t3tools/contracts";
 import { type RefObject, useEffect, useEffectEvent, useSyncExternalStore } from "react";
 
+import { dropSplit, endSplitDrop, moveSplitDrop } from "../../splitView/splitDrop";
+
 export const THREAD_CONTEXT_DROP_EVENT = "t3-thread-context-drop";
 
 export function useThreadContextDrop(
@@ -62,19 +64,18 @@ export function useThreadContextDragGhost(): ThreadContextDragGhost | null {
 
 let overTarget: HTMLElement | null = null;
 
-function findDropTarget(point: { x: number; y: number }): HTMLElement | null {
-  return (
-    document
-      .elementFromPoint(point.x, point.y)
-      ?.closest<HTMLElement>(`[${DROP_TARGET_ATTRIBUTE}]`) ?? null
-  );
+function findDropTarget(element: Element | null): HTMLElement | null {
+  return element?.closest<HTMLElement>(`[${DROP_TARGET_ATTRIBUTE}]`) ?? null;
 }
 
+/** Over a context drop target the thread joins that composer; near a chat edge it opens a split. */
 export function moveThreadContextDrag(
   point: { x: number; y: number },
   label: { title: string; count: number },
 ) {
-  const target = findDropTarget(point);
+  const element = document.elementFromPoint(point.x, point.y);
+  const target = findDropTarget(element);
+  moveSplitDrop(target === null && label.count === 1 ? element : null, point);
   if (target !== overTarget) {
     overTarget?.removeAttribute(DROP_OVER_ATTRIBUTE);
     target?.setAttribute(DROP_OVER_ATTRIBUTE, "true");
@@ -84,6 +85,7 @@ export function moveThreadContextDrag(
 }
 
 export function endThreadContextDrag() {
+  endSplitDrop();
   overTarget?.removeAttribute(DROP_OVER_ATTRIBUTE);
   overTarget = null;
   setGhost(null);
@@ -93,8 +95,10 @@ export function dropThreadContext(
   point: { x: number; y: number },
   threads: ReadonlyArray<ScopedThreadRef>,
 ): boolean {
-  const target = findDropTarget(point);
-  if (!target || threads.length === 0) return false;
+  const element = document.elementFromPoint(point.x, point.y);
+  const target = findDropTarget(element);
+  if (!target) return dropSplit(element, point, threads);
+  if (threads.length === 0) return false;
   target.dispatchEvent(new CustomEvent(THREAD_CONTEXT_DROP_EVENT, { detail: threads }));
   return true;
 }

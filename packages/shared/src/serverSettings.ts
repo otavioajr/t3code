@@ -606,6 +606,9 @@ export function applyServerSettingsPatch(
     ...(patch.fallbackModelSelection !== undefined
       ? { fallbackModelSelection: patch.fallbackModelSelection }
       : {}),
+    ...(patch.sideChatModelSelection !== undefined
+      ? { sideChatModelSelection: patch.sideChatModelSelection }
+      : {}),
     ...(patch.speechPostProcessingModelSelection !== undefined
       ? { speechPostProcessingModelSelection: patch.speechPostProcessingModelSelection }
       : {}),

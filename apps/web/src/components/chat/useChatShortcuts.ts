@@ -8,6 +8,7 @@ import {
   preventTerminalCloseShortcut,
 } from "../../lib/terminalCloseShortcut";
 import { isInSideChatPane } from "../../lib/sideChatPane";
+import { chatPaneOwnsTarget, useChatPane } from "../../splitView/chatPane";
 import { getTerminalFocusOwner, type TerminalFocusOwner } from "../../lib/terminalFocus";
 import type { ComposerHandleRef } from "../../composerHandleContext";
 import type { BranchToolbarHandle } from "../BranchToolbar";
@@ -53,6 +54,7 @@ interface ChatShortcutsInput {
 export function useChatShortcuts(input: ChatShortcutsInput) {
   const embedded = input.embedded === true;
   const composerElement = embedded ? (input.composerElement ?? null) : null;
+  const chatPane = useChatPane();
   const handleShortcut = useEffectEvent((event: KeyboardEvent) => {
     const { keybindings } = input;
     if (preventRepeatedTerminalCloseShortcut(event, keybindings)) {
@@ -64,7 +66,13 @@ export function useChatShortcuts(input: ChatShortcutsInput) {
       event.stopPropagation();
       return;
     }
-    if (!input.enabled || isCommandPaletteOpen() || isInSideChatPane(event.target)) return;
+    if (
+      !input.enabled ||
+      isCommandPaletteOpen() ||
+      isInSideChatPane(event.target) ||
+      !chatPaneOwnsTarget(chatPane, event.target)
+    )
+      return;
     const terminalFocusOwner = getTerminalFocusOwner();
     if (event.defaultPrevented && terminalFocusOwner === null) return;
     const shortcutContext = input.getShortcutContext(event.target);
@@ -100,7 +108,8 @@ export function useChatShortcuts(input: ChatShortcutsInput) {
       event.isComposing ||
       event.keyCode === 229 ||
       isCommandPaletteOpen() ||
-      isInSideChatPane(event.target)
+      isInSideChatPane(event.target) ||
+      !chatPaneOwnsTarget(chatPane, event.target)
     )
       return;
     const context = input.getShortcutContext(event.target);

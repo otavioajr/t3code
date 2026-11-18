@@ -73,6 +73,8 @@ import {
   RotateCcwIcon,
   SettingsIcon,
   MonitorIcon,
+  Columns2Icon,
+  Rows2Icon,
   PinIcon,
   PinOffIcon,
   PlugIcon,
@@ -82,6 +84,9 @@ import {
 } from "lucide-react";
 import { openThreadFind } from "./chat/threadFindStore";
 import { dispatchPreviewAction } from "./preview/previewActionBus";
+import { dispatchMenuAction } from "../shortcuts/dispatcher";
+import { isSplitActive } from "../splitView/splitViewModel";
+import { useSplitViewStore } from "../splitView/splitViewStore";
 import { previewBridge } from "./preview/previewBridge";
 import {
   useDeferredValue,
@@ -484,6 +489,7 @@ function OpenCommandPaletteDialog(props: {
   const { activeDraftThread, activeThread, defaultProjectRef, handleNewThread } =
     useHandleNewThread();
   const paletteRouteTarget = useThreadRouteTarget();
+  const splitActive = useSplitViewStore(isSplitActive);
   const projects = useProjects();
   const referenceThreadRef =
     pathname === "/pull-requests"
@@ -1698,6 +1704,44 @@ function OpenCommandPaletteDialog(props: {
         queueWorkspaceFocusFromPalette(direction);
       },
     });
+  }
+
+  if (paletteRouteTarget !== null) {
+    const splitItems = [
+      ["splitView.splitRight", "New split right", ["split", "side by side", "columns"]],
+      ["splitView.splitDown", "New split below", ["split", "stack", "rows"]],
+      ...(splitActive
+        ? ([
+            ["splitView.focusNext", "Focus next split pane", ["split", "pane", "focus"]],
+            ["splitView.focusPrevious", "Focus previous split pane", ["split", "pane", "focus"]],
+            ["splitView.moveLeft", "Move split left", ["split", "pane", "move"]],
+            ["splitView.moveRight", "Move split right", ["split", "pane", "move"]],
+            ["splitView.moveUp", "Move split up", ["split", "pane", "move"]],
+            ["splitView.moveDown", "Move split down", ["split", "pane", "move"]],
+            ["splitView.close", "Close split", ["split", "single", "unsplit"]],
+          ] as const)
+        : []),
+    ] as const;
+    for (const [command, title, terms] of splitItems) {
+      actionItems.push({
+        kind: "action",
+        value: `action:${command}`,
+        title,
+        searchTerms: [title, ...terms],
+        icon:
+          command === "splitView.splitDown" ||
+          command === "splitView.moveUp" ||
+          command === "splitView.moveDown" ? (
+            <Rows2Icon className={ITEM_ICON_CLASS} />
+          ) : (
+            <Columns2Icon className={ITEM_ICON_CLASS} />
+          ),
+        shortcutCommand: command,
+        run: async () => {
+          dispatchMenuAction(command);
+        },
+      });
+    }
   }
 
   actionItems.push({

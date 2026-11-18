@@ -1,4 +1,8 @@
-import { AuthPreviewOperateScope, type EnvironmentId } from "@t3tools/contracts";
+import {
+  AuthPreviewOperateScope,
+  type EnvironmentId,
+  type SplitViewKeybindingCommand,
+} from "@t3tools/contracts";
 import type { AnyRouter } from "@tanstack/react-router";
 
 import { stackedThreadToast, toastManager } from "~/components/ui/toast";
@@ -29,7 +33,14 @@ import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../termina
 import { useThreadSelectionStore } from "../threadSelectionStore";
 import { resolveThreadRouteTarget } from "../threadRoutes";
 import { useUiStateStore } from "../uiStateStore";
-import { type CommandHandler, registerCommands } from "./dispatcher";
+import type { SplitEdge } from "../splitView/splitViewModel";
+import {
+  closeSplit,
+  focusAdjacentPane,
+  moveFocusedPane,
+  openThreadInSplit,
+} from "../splitView/splitViewStore";
+import { type CommandHandler, registerCommands, registerMenuAction } from "./dispatcher";
 
 const CHAT_ROUTE_ID = "/_chat";
 
@@ -118,8 +129,39 @@ export function installChatRouteCommands(router: AnyRouter): () => void {
       if (threadRef && canOperatePreview(threadRef.environmentId)) dispatchPreviewAction(action);
     };
 
-  return registerCommands(
+  // A new split pane starts a new thread in the current project, which the route then fills it with.
+  const splitNew = (edge: SplitEdge) => () => {
+    if (!openThreadInSplit(router, null, edge)) return false;
+    void startNewThreadFromContext(readThreadContext());
+  };
+  const splitViewActions: Record<SplitViewKeybindingCommand, () => boolean | void> = {
+    "splitView.splitRight": splitNew("right"),
+    "splitView.splitDown": splitNew("bottom"),
+    "splitView.focusNext": () => focusAdjacentPane(router, 1),
+    "splitView.focusPrevious": () => focusAdjacentPane(router, -1),
+    "splitView.moveLeft": () => moveFocusedPane("left"),
+    "splitView.moveRight": () => moveFocusedPane("right"),
+    "splitView.moveUp": () => moveFocusedPane("top"),
+    "splitView.moveDown": () => moveFocusedPane("bottom"),
+    "splitView.close": closeSplit,
+  };
+  const splitViewCommands = Object.fromEntries(
+    Object.entries(splitViewActions).map(([command, action]): [string, CommandHandler] => [
+      command,
+      (event) => {
+        claim(event);
+        action();
+      },
+    ]),
+  );
+  // The command palette and pane menus run these through the menu action dispatcher.
+  const splitViewMenuActions = Object.entries(splitViewActions).map(([command, action]) =>
+    registerMenuAction(command, () => void action()),
+  );
+
+  const disposeCommands = registerCommands(
     {
+      ...splitViewCommands,
       "chat.newLocal": startNewLocal,
       "chat.newWithoutProject": (event) => {
         const { activeThread, activeDraftThread } = readThreadContext();
@@ -196,4 +238,8 @@ export function installChatRouteCommands(router: AnyRouter): () => void {
       },
     },
   );
+  return () => {
+    disposeCommands();
+    for (const dispose of splitViewMenuActions) dispose();
+  };
 }

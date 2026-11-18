@@ -1016,17 +1016,20 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
 
   const selectedPromptEffort = composerProviderState.promptEffort;
   const selectedModelOptionsForDispatch = composerProviderState.modelOptionsForDispatch;
+  // A side chat answers a quick question: no plan mode and no advisor.
+  const isSideChat = activeThread?.lineage.sideChat === true;
   const {
     enabled: planModeUiEnabled,
     interactionMode,
     planFirst,
   } = resolveComposerInteractionMode({
     provider: selectedProviderStatus,
-    interactionMode: requestedInteractionMode,
+    interactionMode: isSideChat ? "default" : requestedInteractionMode,
   });
   // The built-in plan entry points (/plan, the footer toggle, Shift+Tab) apply to a provider with
   // the native toggle or without a /plan of its own.
   const planCommandAvailable =
+    !isSideChat &&
     selectedProviderStatus !== null &&
     (planModeUiEnabled ||
       !selectedProviderSlashCommands.some((command) => command.name === "plan"));
@@ -3895,7 +3898,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     keepFullHistory={props.keepFullHistory}
                     onToggleKeepFullHistory={props.onToggleKeepFullHistory}
                   >
-                    {activePendingProgress ? null : (
+                    {activePendingProgress || isSideChat ? null : (
                       <ComposerAdvisorControl
                         environmentId={environmentId}
                         requested={advisorRequested}

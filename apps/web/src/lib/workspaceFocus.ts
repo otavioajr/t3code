@@ -9,6 +9,15 @@ const FOCUSABLE_SELECTOR =
   'button:not(:disabled), a[href], input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [contenteditable="true"], [tabindex]';
 
 /** Props that make an element one stop in the F6 cycle; `order` sets its place in the cycle. */
+// Several panel groups can show surfaces; keyboard focus belongs to the focused one.
+function rightPanelSurfaceIn(area: ParentNode): HTMLElement | null {
+  return (
+    area.querySelector<HTMLElement>(
+      '[data-right-panel-group-focused="true"] [data-right-panel-surface-content]',
+    ) ?? area.querySelector<HTMLElement>("[data-right-panel-surface-content]")
+  );
+}
+
 export function workspaceAreaProps(name: string, order: number, label?: string) {
   return {
     "data-workspace-area": name,
@@ -171,7 +180,7 @@ export function createWorkspaceFocusController(doc: Document) {
                   element.textContent === previous.textContent)),
           )
         : undefined;
-    const surface = area.querySelector<HTMLElement>("[data-right-panel-surface-content]");
+    const surface = rightPanelSurfaceIn(area);
     const surfaceControl = surface
       ? Array.from(surface.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).find(
           (element) => belongs(element) && element.tabIndex >= 0,
@@ -223,7 +232,7 @@ export function createWorkspaceFocusController(doc: Document) {
           areas.find((element) => element.dataset.workspaceArea === "panel"))
         : areas.find((element) => element.dataset.workspaceArea === name);
     if (!area) return false;
-    const surface = area.querySelector("[data-right-panel-surface-content]");
+    const surface = rightPanelSurfaceIn(area);
     // A lazy surface's Suspense fallback is empty. Wait for its content instead
     // of claiming focus on the tab strip before the useful controls mount.
     if (surface && !surface.hasChildNodes()) return false;

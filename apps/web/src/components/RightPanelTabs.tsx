@@ -28,6 +28,9 @@ import {
   closestCenter,
   DndContext,
   type DragEndEvent,
+  type DragMoveEvent,
+  DragOverlay,
+  type DragStartEvent,
   PointerSensor,
   useSensor,
   useSensors,
@@ -40,17 +43,25 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  Columns2,
+  Ellipsis,
   FileDiff,
   Files,
   Globe2,
   ListChecks,
+  Maximize2,
   MessagesSquare,
+  Minimize2,
+  Minus,
   Plus,
+  Rows2,
   TerminalSquare,
   Volume2Icon,
   VolumeOffIcon,
+  XIcon,
 } from "lucide-react";
 import {
+  Fragment,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type ReactElement,
@@ -64,6 +75,8 @@ import {
 import { isElectron } from "~/env";
 import type { DesktopPreviewOverlay } from "~/previewStateStore";
 import type { RightPanelSurface } from "~/rightPanelStore";
+import type { RightPanelDropTarget, RightPanelLayout } from "~/rightPanelLayoutModel";
+import { setBrowserSurfacesSuppressed } from "~/browser/browserSurfaceSuppression";
 import { cn } from "~/lib/utils";
 import { resolveShortcutCommand, type ShortcutMatchContext } from "~/keybindings";
 import { readLocalApi } from "~/localApi";
@@ -101,12 +114,14 @@ import { PreviewPanelShell, type PreviewPanelMode } from "./preview/PreviewPanel
 import { FaviconImage } from "./preview/PreviewFaviconIcon";
 import { previewBridge } from "./preview/previewBridge";
 import { dispatchPreviewAction } from "./preview/previewActionBus";
+import { chatPaneOwnsTarget, useChatPane } from "../splitView/chatPane";
 import { preventThumbButtonFocus, takeThumbButtonNavigation } from "./preview/thumbButtons";
 import { PierreEntryIcon } from "./chat/PierreEntryIcon";
 import { resolvePullRequestState } from "./pullRequest/pullRequestPresentation";
 import { PullRequestGlyph } from "~/components/pullRequest/pullRequestIcons";
 import { observeResize } from "~/lib/observeResize";
 import { surfaceShortcutKey } from "~/lib/surfaceShortcutKey";
+import { RightPanelLayoutDivider } from "./RightPanelLayoutDivider";
 
 export interface RightPanelTabsProps {
   mode: PreviewPanelMode;
@@ -134,8 +149,12 @@ export interface RightPanelTabsProps {
   onCloseSurface: (surface: RightPanelSurface) => void;
   onCloseOtherSurfaces: (surface: RightPanelSurface) => void;
   onCloseSurfacesToRight: (surface: RightPanelSurface) => void;
-  onCloseAllSurfaces: () => void;
+  /** With a group id, closes only that group's tabs. */
+  onCloseAllSurfaces: (groupId?: string) => void;
+  /** Reorders within the tab's group. */
   onMoveSurface?: (surfaceId: string, toIndex: number) => void;
+  /** Arranges tabs in columns and stacked groups; absent renders one tab strip. */
+  groups?: RightPanelGroupsProps;
   onCopyFilePath: (relativePath: string) => void;
   onAddBrowser: () => void;
   /** Keep separate from the DOM click handler so a MouseEvent cannot become a profile id. */
@@ -160,6 +179,19 @@ export interface RightPanelTabsProps {
   sideChatDisabledReason?: string | null;
   pullRequestStatusSeeds?: Readonly<Record<string, PullRequestTabStatusSeed>>;
   children: ReactNode;
+}
+
+export interface RightPanelGroupsProps {
+  layout: RightPanelLayout;
+  maximizedGroupId: string | null;
+  renderSurface: (surface: RightPanelSurface) => ReactNode;
+  onFocusGroup: (groupId: string) => void;
+  onMoveSurfaceTo: (surfaceId: string, target: RightPanelDropTarget) => void;
+  onResizeColumns: (sizes: readonly number[]) => void;
+  onResizeGroups: (columnId: string, sizes: readonly number[]) => void;
+  onToggleGroupMaximized: (groupId: string) => void;
+  onMinimizeGroup: (groupId: string) => void;
+  onCloseGroup: (groupId: string) => void;
 }
 
 export interface PullRequestTabStatus {
@@ -213,6 +245,10 @@ const SURFACE_UNAVAILABLE_HINTS = {
 } as const;
 
 type TabContextMenuAction =
+  | "move-new-column"
+  | "split-down"
+  | "move-to-group"
+  | `move-to-group:${string}`
   | "rename"
   | "copy-path"
   | "toggle-mute"
@@ -223,6 +259,7 @@ type TabContextMenuAction =
 
 const TAB_SCROLL_EDGE_TOLERANCE = 1;
 const TAB_DRAG_MODIFIERS = [restrictToHorizontalAxis, restrictToFirstScrollableAncestor];
+const NO_DRAG_MODIFIERS: typeof TAB_DRAG_MODIFIERS = [];
 
 function tabScrollViewport(root: HTMLDivElement | null): HTMLDivElement | null {
   return root?.querySelector<HTMLDivElement>('[data-slot="scroll-area-viewport"]') ?? null;
@@ -834,31 +871,85 @@ function PullRequestSurfaceIcon({
   return <presentation.Icon className={cn("size-3 shrink-0", presentation.toneClassName)} />;
 }
 
-function SortableTabList(props: {
-  surfaces: readonly RightPanelSurface[];
-  onMove: ((surfaceId: string, toIndex: number) => void) | undefined;
-  children: ReactNode;
-}) {
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
-  const surfaceIds = props.surfaces.map((surface) => surface.id);
-  const { onMove, surfaces } = props;
-  const handleDragEnd = ({ active, over }: DragEndEvent) => {
-    if (!over || active.id === over.id) return;
-    const toIndex = surfaces.findIndex((surface) => surface.id === over.id);
-    if (toIndex >= 0) onMove?.(String(active.id), toIndex);
-  };
+function SortableTabList(props: { surfaceIds: readonly string[]; children: ReactNode }) {
   return (
-    <DndContext
-      sensors={sensors}
-      collisionDetection={closestCenter}
-      modifiers={TAB_DRAG_MODIFIERS}
-      onDragEnd={handleDragEnd}
-    >
-      <SortableContext items={surfaceIds} strategy={horizontalListSortingStrategy}>
-        {props.children}
-      </SortableContext>
-    </DndContext>
+    <SortableContext items={[...props.surfaceIds]} strategy={horizontalListSortingStrategy}>
+      {props.children}
+    </SortableContext>
   );
+}
+
+export type RightPanelDropZone = "left" | "right" | "top" | "bottom" | "center" | "tabs";
+
+export interface RightPanelDropIndicator {
+  readonly groupId: string;
+  readonly zone: RightPanelDropZone;
+  /** For "tabs": where in the strip the tab lands. */
+  readonly index?: number;
+}
+
+const DROP_EDGE_FRACTION = 0.25;
+
+/** Nearest edge within a quarter of the group's size, else its center. */
+export function rightPanelDropZoneAt(
+  rect: { left: number; top: number; width: number; height: number },
+  x: number,
+  y: number,
+): Exclude<RightPanelDropZone, "tabs"> {
+  if (rect.width <= 0 || rect.height <= 0) return "center";
+  const left = (x - rect.left) / rect.width;
+  const top = (y - rect.top) / rect.height;
+  const edges = [
+    ["left", left],
+    ["right", 1 - left],
+    ["top", top],
+    ["bottom", 1 - top],
+  ] as const;
+  const [zone, distance] = edges.reduce((nearest, edge) => (edge[1] < nearest[1] ? edge : nearest));
+  return distance < DROP_EDGE_FRACTION ? zone : "center";
+}
+
+export function rightPanelDropTarget(indicator: RightPanelDropIndicator): RightPanelDropTarget {
+  switch (indicator.zone) {
+    case "left":
+    case "right":
+      return { kind: "column", groupId: indicator.groupId, side: indicator.zone };
+    case "top":
+      return { kind: "split", groupId: indicator.groupId, side: "above" };
+    case "bottom":
+      return { kind: "split", groupId: indicator.groupId, side: "below" };
+    case "center":
+      return { kind: "join", groupId: indicator.groupId };
+    case "tabs":
+      return {
+        kind: "join",
+        groupId: indicator.groupId,
+        ...(indicator.index === undefined ? {} : { index: indicator.index }),
+      };
+  }
+}
+
+export const MINIMIZE_NEEDS_PAGE_REASON = "Minimize works after a page has loaded";
+export const MINIMIZE_UNSUPPORTED_REASON = "Files and diff panels can't be minimized";
+
+/** Why a group cannot become a card, or null when it can. */
+export function rightPanelMinimizeBlockedReason(
+  surfaces: readonly RightPanelSurface[],
+  activeSurface: RightPanelSurface | null,
+  sessions: Readonly<Record<string, PreviewSessionSnapshot>>,
+): string | null {
+  if (
+    surfaces.some(
+      (surface) => surface.kind === "files" || surface.kind === "file" || surface.kind === "diff",
+    )
+  ) {
+    return MINIMIZE_UNSUPPORTED_REASON;
+  }
+  if (activeSurface?.kind === "preview") {
+    const snapshot = activeSurface.resourceId ? sessions[activeSurface.resourceId] : undefined;
+    if (!snapshot || snapshot.navStatus._tag === "Idle") return MINIMIZE_NEEDS_PAGE_REASON;
+  }
+  return null;
 }
 
 interface RightPanelTabHandlers {
@@ -1039,38 +1130,70 @@ function RightPanelTab(
   );
 }
 
+interface RightPanelGroupEntry {
+  readonly id: string | null;
+  readonly columnId: string | null;
+  readonly surfaces: readonly RightPanelSurface[];
+  readonly activeSurfaceId: string | null;
+}
+
 export function RightPanelTabs(props: RightPanelTabsProps) {
   const focusedSurface = props.surfaces.find((surface) => surface.id === props.activeSurfaceId);
   const ownsDesktopTitleBar = isElectron && props.mode === "inline";
   const browserProfiles = useBrowserDefaults().profiles;
   const { resolvedTheme } = useTheme();
-  const tabListRef = useRef<HTMLDivElement>(null);
-  const addSurfaceTriggerRef = useRef<HTMLButtonElement>(null);
   const [renamingSurface, setRenamingSurface] = useState<string | null>(null);
-  const [addSurfaceMenuOpen, setAddSurfaceMenuOpen] = useState(false);
-  const [tabScrollState, setTabScrollState] = useState({
-    hasOverflow: false,
-    canScrollLeft: false,
-    canScrollRight: false,
-  });
+  // The group whose add menu is open; "single" outside the group layout.
+  const [addMenuGroup, setAddMenuGroup] = useState<string | null>(null);
+  const [dragging, setDragging] = useState<string | null>(null);
+  const [dropIndicator, setDropIndicator] = useState<RightPanelDropIndicator | null>(null);
+  const groups = props.groups;
+  const layout = groups?.layout ?? null;
+  const surfacesById = new Map<string, RightPanelSurface>(
+    props.surfaces.map((surface) => [surface.id, surface]),
+  );
+  const minimizedSurfaceIds = new Set(
+    layout?.minimized.flatMap((entry) => entry.group.surfaceIds) ?? [],
+  );
+  const looseSurfaces = props.surfaces.filter((surface) => !minimizedSurfaceIds.has(surface.id));
+  const groupEntries: RightPanelGroupEntry[] =
+    layout && layout.columns.length > 0
+      ? layout.columns.flatMap((column) =>
+          column.groups.map((group) => ({
+            id: group.id,
+            columnId: column.id,
+            surfaces: group.surfaceIds.flatMap((id) => surfacesById.get(id) ?? []),
+            activeSurfaceId: group.activeSurfaceId,
+          })),
+        )
+      : [
+          {
+            id: null,
+            columnId: null,
+            surfaces: looseSurfaces,
+            activeSurfaceId: looseSurfaces.some((surface) => surface.id === props.activeSurfaceId)
+              ? props.activeSurfaceId
+              : null,
+          },
+        ];
+  const focusedGroupKey = layout?.focusedGroupId ?? groupEntries[0]?.id ?? null;
 
-  if (props.open === false && addSurfaceMenuOpen) setAddSurfaceMenuOpen(false);
+  if (props.open === false && addMenuGroup !== null) setAddMenuGroup(null);
 
+  const chatPane = useChatPane();
   const onNewSurfaceKeyDown = useEffectEvent((event: KeyboardEvent) => {
     if (event.defaultPrevented || event.isComposing) return;
+    if (!chatPaneOwnsTarget(chatPane, event.target)) return;
     if (
       resolveShortcutCommand(event, props.keybindings, {
         context: { ...props.getShortcutContext(), rightPanelOpen: true },
       }) !== "rightPanel.new"
     )
       return;
-    if (!addSurfaceMenuOpen && document.querySelector(LAUNCHER_SHORTCUT_BLOCKING_LAYERS)) return;
+    if (addMenuGroup === null && document.querySelector(LAUNCHER_SHORTCUT_BLOCKING_LAYERS)) return;
     event.preventDefault();
     event.stopPropagation();
-    if (!event.repeat) {
-      addSurfaceTriggerRef.current?.focus();
-      setAddSurfaceMenuOpen(true);
-    }
+    if (!event.repeat) setAddMenuGroup(focusedGroupKey ?? "single");
   });
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- subscribes a document keydown listener for the new surface shortcut while the panel is open
   useEffect(() => {
@@ -1078,6 +1201,650 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
     document.addEventListener("keydown", onNewSurfaceKeyDown, true);
     return () => document.removeEventListener("keydown", onNewSurfaceKeyDown, true);
   }, [props.open]);
+
+  const groupOfSurface = (surfaceId: string) =>
+    groupEntries.find((entry) => entry.surfaces.some((surface) => surface.id === surfaceId)) ??
+    null;
+
+  const handleTabContextMenu = async (event: ReactMouseEvent, surface: RightPanelSurface) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const api = readLocalApi();
+    if (!api) return;
+
+    const group = groupOfSurface(surface.id);
+    const groupSurfaces = group?.surfaces ?? props.surfaces;
+    const surfaceIndex = groupSurfaces.findIndex((entry) => entry.id === surface.id);
+    if (surfaceIndex < 0) return;
+
+    const items: ContextMenuItem<TabContextMenuAction>[] = [];
+    if ((surface.kind === "device" || surface.kind === "terminal") && props.onRenameSurface)
+      items.push({ id: "rename", label: "Rename" });
+    if (surface.kind === "file" && surface.attachment === undefined) {
+      items.push({ id: "copy-path", label: "Copy path" });
+    }
+    const menuPreviewTabId = previewTabIdOf(surface, props.previewSessions);
+    const menuOverlay = menuPreviewTabId ? (props.desktopByTabId[menuPreviewTabId] ?? null) : null;
+    const menuMuted = menuOverlay?.audioMuted ?? false;
+    if (surface.kind === "preview") {
+      items.push({
+        id: "toggle-mute",
+        ...tabMuteMenuItem({
+          overlay: menuOverlay,
+          canResolveRuntimeTabId: props.previewRuntimeTabId !== undefined,
+        }),
+      });
+    }
+    if (groups && group?.id) {
+      const lone = groupSurfaces.length === 1;
+      const otherGroups = groupEntries.filter(
+        (entry) => entry.id !== null && entry.id !== group.id,
+      );
+      items.push(
+        {
+          id: "move-new-column",
+          label: "Move to new column",
+          disabled:
+            lone &&
+            (layout?.columns.find((column) => column.id === group.columnId)?.groups.length ?? 0) <=
+              1,
+          separatorBefore: items.length > 0,
+        },
+        { id: "split-down", label: "Split down", disabled: lone },
+        {
+          id: "move-to-group",
+          label: "Move to group",
+          disabled: otherGroups.length === 0,
+          children: otherGroups.map((entry) => ({
+            id: `move-to-group:${entry.id}` as const,
+            label: `Group ${groupEntries.indexOf(entry) + 1}: ${groupLabel(entry, props)}`,
+          })),
+        },
+      );
+    }
+    items.push(
+      { id: "close", label: "Close", separatorBefore: items.length > 0 },
+      {
+        id: "close-others",
+        label: "Close others",
+        disabled: groupSurfaces.length <= 1,
+      },
+      {
+        id: "close-to-right",
+        label: "Close to the right",
+        disabled: surfaceIndex >= groupSurfaces.length - 1,
+      },
+      {
+        id: "close-all",
+        label: "Close all",
+        disabled: groupSurfaces.length === 0,
+      },
+    );
+
+    const action = await api.contextMenu.show(items, { x: event.clientX, y: event.clientY });
+    if (action !== null && action.startsWith("move-to-group:")) {
+      groups?.onMoveSurfaceTo(surface.id, {
+        kind: "join",
+        groupId: action.slice("move-to-group:".length),
+      });
+      return;
+    }
+    switch (action) {
+      case "rename":
+        setRenamingSurface(surface.id);
+        break;
+      case "copy-path":
+        if (surface.kind === "file" && surface.attachment === undefined) {
+          props.onCopyFilePath(surface.relativePath);
+        }
+        break;
+      case "toggle-mute": {
+        const runtimeTabId =
+          menuPreviewTabId && menuOverlay
+            ? (props.previewRuntimeTabId?.(menuPreviewTabId) ?? null)
+            : null;
+        if (runtimeTabId) {
+          void previewBridge?.setAudioMuted(runtimeTabId, !menuMuted).catch(() => undefined);
+        }
+        break;
+      }
+      case "move-new-column":
+        if (group?.id) {
+          groups?.onMoveSurfaceTo(surface.id, { kind: "column", groupId: group.id, side: "right" });
+        }
+        break;
+      case "split-down":
+        if (group?.id) {
+          groups?.onMoveSurfaceTo(surface.id, { kind: "split", groupId: group.id, side: "below" });
+        }
+        break;
+      case "close":
+        props.onCloseSurface(surface);
+        break;
+      case "close-others":
+        props.onCloseOtherSurfaces(surface);
+        break;
+      case "close-to-right":
+        props.onCloseSurfacesToRight(surface);
+        break;
+      case "close-all":
+        props.onCloseAllSurfaces(group?.id ?? undefined);
+        break;
+      default:
+        break;
+    }
+  };
+  const handleTabAuxClick = (event: ReactMouseEvent, surface: RightPanelSurface) => {
+    if (event.button !== 1) return;
+    event.preventDefault();
+    event.stopPropagation();
+    props.onCloseSurface(surface);
+  };
+  const tabHandlers: RightPanelTabHandlers = {
+    onActivate: useStableCallback(props.onActivate),
+    onClose: useStableCallback(props.onCloseSurface),
+    onAuxClick: useStableCallback(handleTabAuxClick),
+    onContextMenu: useStableCallback((event: ReactMouseEvent, surface: RightPanelSurface) => {
+      void handleTabContextMenu(event, surface);
+    }),
+    onStartRename: useStableCallback((surfaceId: string) => setRenamingSurface(surfaceId)),
+    onFinishRename: useStableCallback((surfaceId: string, title: string) => {
+      props.onRenameSurface?.(surfaceId, title);
+      setRenamingSurface(null);
+    }),
+  };
+
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
+  const pointerOf = (event: DragMoveEvent | DragEndEvent) => {
+    const activator = event.activatorEvent;
+    if (!(activator instanceof PointerEvent || activator instanceof MouseEvent)) return null;
+    return { x: activator.clientX + event.delta.x, y: activator.clientY + event.delta.y };
+  };
+  const indicatorAt = (
+    surfaceId: string,
+    point: { x: number; y: number },
+    overId: string | null,
+  ): RightPanelDropIndicator | null => {
+    const element = document
+      .elementsFromPoint(point.x, point.y)
+      .find((candidate) => candidate instanceof HTMLElement && candidate.dataset.rightPanelGroup);
+    if (!(element instanceof HTMLElement)) return null;
+    const groupId = element.dataset.rightPanelGroup!;
+    const entry = groupEntries.find((candidate) => candidate.id === groupId);
+    if (!entry) return null;
+    const tabbar = element.querySelector<HTMLElement>("[data-right-panel-tabbar]");
+    const tabRect = tabbar?.getBoundingClientRect();
+    if (tabRect && point.y <= tabRect.bottom) {
+      const overIndex =
+        overId === null ? -1 : entry.surfaces.findIndex((surface) => surface.id === overId);
+      return {
+        groupId,
+        zone: "tabs",
+        ...(overIndex >= 0 ? { index: overIndex } : {}),
+      };
+    }
+    const content = element.querySelector<HTMLElement>("[data-right-panel-surface-content]");
+    const rect = (content ?? element).getBoundingClientRect();
+    const zone = rightPanelDropZoneAt(rect, point.x, point.y);
+    // A group's only tab dropped on itself goes nowhere.
+    const source = groupOfSurface(surfaceId);
+    if (
+      source?.id === groupId &&
+      source.surfaces.length === 1 &&
+      zone !== "left" &&
+      zone !== "right"
+    )
+      return null;
+    return { groupId, zone };
+  };
+  const endDrag = () => {
+    setDragging(null);
+    setDropIndicator(null);
+    setBrowserSurfacesSuppressed(false);
+  };
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- an unmount mid-drag must give native browser views back
+  useEffect(() => () => setBrowserSurfacesSuppressed(false), []);
+  const handleDragStart = (event: DragStartEvent) => {
+    setDragging(String(event.active.id));
+    if (groups) setBrowserSurfacesSuppressed(true);
+  };
+  const handleDragMove = (event: DragMoveEvent) => {
+    if (!groups) return;
+    const point = pointerOf(event);
+    const next = point
+      ? indicatorAt(String(event.active.id), point, event.over ? String(event.over.id) : null)
+      : null;
+    setDropIndicator((current) =>
+      current?.groupId === next?.groupId &&
+      current?.zone === next?.zone &&
+      current?.index === next?.index
+        ? current
+        : next,
+    );
+  };
+  const handleDragEnd = (event: DragEndEvent) => {
+    const surfaceId = String(event.active.id);
+    const indicator = dropIndicator;
+    endDrag();
+    const source = groupOfSurface(surfaceId);
+    if (!groups || !indicator) {
+      const over = event.over;
+      if (!over || over.id === surfaceId || !source) return;
+      const toIndex = source.surfaces.findIndex((surface) => surface.id === over.id);
+      if (toIndex >= 0) props.onMoveSurface?.(surfaceId, toIndex);
+      return;
+    }
+    if (indicator.zone === "tabs" && indicator.groupId === source?.id) {
+      if (indicator.index !== undefined) props.onMoveSurface?.(surfaceId, indicator.index);
+      return;
+    }
+    groups.onMoveSurfaceTo(surfaceId, rightPanelDropTarget(indicator));
+  };
+
+  const draggedSurface = dragging === null ? null : (surfacesById.get(dragging) ?? null);
+  const columns = layout?.columns ?? [];
+  const maximizedGroupId = props.maximized ? (groups?.maximizedGroupId ?? null) : null;
+  const multiGroup =
+    groups !== undefined && groupEntries.length > 0 && groupEntries[0]!.id !== null;
+  const topRightGroupId = columns.at(-1)?.groups[0]?.id ?? null;
+
+  const renderGroup = (entry: RightPanelGroupEntry, topRow: boolean, topRight: boolean) => {
+    const groupKey = entry.id ?? "single";
+    const activeSurface =
+      entry.surfaces.find((surface) => surface.id === entry.activeSurfaceId) ?? null;
+    const minimizeReason = rightPanelMinimizeBlockedReason(
+      entry.surfaces,
+      activeSurface,
+      props.previewSessions,
+    );
+    const groupId = entry.id;
+    const groupMaximized = groupId !== null && maximizedGroupId === groupId;
+    const controls =
+      groups && groupId !== null ? (
+        <RightPanelGroupControls
+          maximized={groupMaximized}
+          minimizeBlockedReason={minimizeReason}
+          canSplit={entry.surfaces.length > 1}
+          onMinimize={() => groups.onMinimizeGroup(groupId)}
+          onToggleMaximized={() => groups.onToggleGroupMaximized(groupId)}
+          onClose={() => groups.onCloseGroup(groupId)}
+          onMoveToNewColumn={() =>
+            activeSurface &&
+            groups.onMoveSurfaceTo(activeSurface.id, { kind: "column", groupId, side: "right" })
+          }
+          onSplitDown={() =>
+            activeSurface &&
+            groups.onMoveSurfaceTo(activeSurface.id, { kind: "split", groupId, side: "below" })
+          }
+        />
+      ) : null;
+    return (
+      <RightPanelGroupView
+        key={groupKey}
+        panel={props}
+        groupId={groupId}
+        surfaces={entry.surfaces}
+        activeSurfaceId={entry.activeSurfaceId}
+        ownsDesktopTitleBar={ownsDesktopTitleBar && topRow}
+        topRight={topRight}
+        maximized={props.maximized === true}
+        groupControls={controls}
+        layoutControls={topRight ? props.layoutControls : null}
+        addMenuOpen={addMenuGroup === groupKey}
+        onAddMenuOpenChange={(open) => setAddMenuGroup(open ? groupKey : null)}
+        renamingSurface={renamingSurface}
+        tabHandlers={tabHandlers}
+        theme={resolvedTheme}
+        browserProfiles={browserProfiles}
+        dropIndicator={dropIndicator?.groupId === groupId ? dropIndicator : null}
+        dragActive={dragging !== null}
+        focused={multiGroup && groupId === focusedGroupKey}
+        onFocus={
+          groups && groupId !== null && groupId !== focusedGroupKey
+            ? () => groups.onFocusGroup(groupId)
+            : undefined
+        }
+      >
+        {groups && groupId !== null
+          ? activeSurface
+            ? groups.renderSurface(activeSurface)
+            : null
+          : entry.activeSurfaceId === null
+            ? null
+            : props.children}
+      </RightPanelGroupView>
+    );
+  };
+
+  const emptyState = (
+    <RightPanelEmptyState
+      onAddBrowser={props.onAddBrowser}
+      onAddBrowserInProfile={props.onAddBrowserInProfile}
+      browserProfiles={browserProfiles}
+      onAddTerminal={props.onAddTerminal}
+      onAddDiff={props.onAddDiff}
+      onAddFiles={props.onAddFiles}
+      onAddPullRequest={props.onAddPullRequest}
+      onAddPullRequests={props.onAddPullRequests}
+      onAddDevice={props.onAddDevice}
+      onAddSideChat={props.onAddSideChat}
+      browserAvailable={props.browserAvailable}
+      terminalAvailable={props.terminalAvailable}
+      diffAvailable={props.diffAvailable}
+      filesAvailable={props.filesAvailable}
+      pullRequestAvailable={props.pullRequestAvailable}
+      pullRequestsAvailable={props.pullRequestsAvailable}
+      deviceAvailable={props.deviceAvailable}
+      sideChatAvailable={props.sideChatAvailable === true}
+      sideChatDisabledReason={props.sideChatDisabledReason ?? null}
+    />
+  );
+
+  let body: ReactNode;
+  if (!multiGroup) {
+    const entry = groupEntries[0]!;
+    body = renderGroup(entry, true, true);
+    if (entry.activeSurfaceId === null) {
+      body = (
+        <RightPanelGroupView
+          key="single"
+          panel={props}
+          groupId={null}
+          surfaces={entry.surfaces}
+          activeSurfaceId={null}
+          ownsDesktopTitleBar={ownsDesktopTitleBar}
+          topRight
+          maximized={props.maximized === true}
+          groupControls={null}
+          layoutControls={props.layoutControls}
+          addMenuOpen={addMenuGroup === "single"}
+          onAddMenuOpenChange={(open) => setAddMenuGroup(open ? "single" : null)}
+          renamingSurface={renamingSurface}
+          tabHandlers={tabHandlers}
+          theme={resolvedTheme}
+          browserProfiles={browserProfiles}
+          dropIndicator={null}
+          dragActive={false}
+          focused={false}
+          onFocus={undefined}
+        >
+          {emptyState}
+        </RightPanelGroupView>
+      );
+    }
+  } else {
+    body = (
+      <div className="flex min-h-0 flex-1" data-right-panel-columns>
+        {columns.map((column, columnIndex) => {
+          const columnHidden =
+            maximizedGroupId !== null &&
+            !column.groups.some((group) => group.id === maximizedGroupId);
+          const nextColumn = columns[columnIndex + 1];
+          return (
+            <Fragment key={column.id}>
+              <div
+                className={cn("flex min-h-0 min-w-0 flex-col", columnHidden && "hidden")}
+                style={{ flex: `${maximizedGroupId === null ? column.size : 1} 1 0px` }}
+                data-right-panel-column={column.id}
+              >
+                {column.groups.map((group, groupIndex) => {
+                  const entry = groupEntries.find((candidate) => candidate.id === group.id)!;
+                  const groupHidden = maximizedGroupId !== null && group.id !== maximizedGroupId;
+                  const nextGroup = column.groups[groupIndex + 1];
+                  return (
+                    <Fragment key={group.id}>
+                      <div
+                        className={cn("flex min-h-0 min-w-0 flex-col", groupHidden && "hidden")}
+                        style={{ flex: `${maximizedGroupId === null ? group.size : 1} 1 0px` }}
+                      >
+                        {renderGroup(
+                          entry,
+                          maximizedGroupId !== null || groupIndex === 0,
+                          maximizedGroupId !== null || group.id === topRightGroupId,
+                        )}
+                      </div>
+                      {nextGroup && maximizedGroupId === null ? (
+                        <RightPanelLayoutDivider
+                          orientation="horizontal"
+                          label="Resize stacked panels"
+                          weights={[group.size, nextGroup.size]}
+                          onCommit={([before, after]) =>
+                            groups?.onResizeGroups(
+                              column.id,
+                              column.groups.map((candidate, index) =>
+                                index === groupIndex
+                                  ? before
+                                  : index === groupIndex + 1
+                                    ? after
+                                    : candidate.size,
+                              ),
+                            )
+                          }
+                        />
+                      ) : null}
+                    </Fragment>
+                  );
+                })}
+              </div>
+              {nextColumn && maximizedGroupId === null ? (
+                <RightPanelLayoutDivider
+                  orientation="vertical"
+                  label="Resize panel columns"
+                  weights={[column.size, nextColumn.size]}
+                  onCommit={([before, after]) =>
+                    groups?.onResizeColumns(
+                      columns.map((candidate, index) =>
+                        index === columnIndex
+                          ? before
+                          : index === columnIndex + 1
+                            ? after
+                            : candidate.size,
+                      ),
+                    )
+                  }
+                />
+              ) : null}
+            </Fragment>
+          );
+        })}
+      </div>
+    );
+  }
+
+  return (
+    <PreviewPanelShell
+      workspaceArea
+      workspaceFocusKey={`panel:${props.environmentId}:${props.activeSurfaceId ?? "empty"}`}
+      workspaceLabel={
+        focusedSurface
+          ? `Workspace panel: ${surfaceTitle(focusedSurface, props.previewSessions, props.terminalLabelsById, props.planTitlesById)}`
+          : "Workspace panel"
+      }
+      mode={props.mode}
+      {...(props.maximized !== undefined ? { maximized: props.maximized } : {})}
+      {...(props.open !== undefined ? { open: props.open } : {})}
+      {...(props.widthStorageKey !== undefined ? { widthStorageKey: props.widthStorageKey } : {})}
+      {...(props.defaultWidth !== undefined ? { defaultWidth: props.defaultWidth } : {})}
+      {...(props.inlineSize ? { inlineSize: props.inlineSize } : {})}
+      onMouseDown={preventThumbButtonFocus}
+      onMouseUp={(event) =>
+        takeThumbButtonNavigation(
+          event,
+          focusedSurface?.kind === "preview" ? dispatchPreviewAction : undefined,
+        )
+      }
+    >
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        modifiers={groups ? NO_DRAG_MODIFIERS : TAB_DRAG_MODIFIERS}
+        onDragStart={handleDragStart}
+        onDragMove={handleDragMove}
+        onDragEnd={handleDragEnd}
+        onDragCancel={endDrag}
+      >
+        {body}
+        {groups ? (
+          <DragOverlay dropAnimation={null}>
+            {draggedSurface ? (
+              <div className="flex h-6 max-w-40 items-center gap-1 rounded-md bg-accent px-2 text-xs text-foreground shadow-lg/20">
+                <span className="truncate">
+                  {surfaceTitle(
+                    draggedSurface,
+                    props.previewSessions,
+                    props.terminalLabelsById,
+                    props.planTitlesById,
+                  )}
+                </span>
+              </div>
+            ) : null}
+          </DragOverlay>
+        ) : null}
+      </DndContext>
+    </PreviewPanelShell>
+  );
+}
+
+function groupLabel(entry: RightPanelGroupEntry, props: RightPanelTabsProps): string {
+  const active = entry.surfaces.find((surface) => surface.id === entry.activeSurfaceId);
+  return active
+    ? surfaceTitle(active, props.previewSessions, props.terminalLabelsById, props.planTitlesById)
+    : "Empty";
+}
+
+function GroupControlButton(props: {
+  label: string;
+  disabledReason?: string | null;
+  pressed?: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  const disabled = Boolean(props.disabledReason);
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <span className="inline-flex [-webkit-app-region:no-drag]">
+            <Button
+              aria-label={props.label}
+              {...(props.pressed === undefined ? {} : { "aria-pressed": props.pressed })}
+              disabled={disabled}
+              onClick={props.onClick}
+              size="icon-xs"
+              variant="ghost-muted"
+            >
+              {props.children}
+            </Button>
+          </span>
+        }
+      />
+      <TooltipPopup side="bottom">{props.disabledReason || props.label}</TooltipPopup>
+    </Tooltip>
+  );
+}
+
+function RightPanelGroupControls(props: {
+  maximized: boolean;
+  minimizeBlockedReason: string | null;
+  canSplit: boolean;
+  onMinimize: () => void;
+  onToggleMaximized: () => void;
+  onClose: () => void;
+  onMoveToNewColumn: () => void;
+  onSplitDown: () => void;
+}) {
+  return (
+    <div className="flex shrink-0 items-center gap-0.5" data-right-panel-group-controls>
+      <Menu>
+        <MenuTrigger
+          render={
+            <Button
+              aria-label="Panel options"
+              className="[-webkit-app-region:no-drag]"
+              size="icon-xs"
+              variant="ghost-muted"
+            />
+          }
+        >
+          <Ellipsis className="size-3.5" />
+        </MenuTrigger>
+        <MenuPopup align="end" side="bottom" sideOffset={6}>
+          <MenuItem onClick={props.onMoveToNewColumn}>
+            <Columns2 />
+            Move tab to new column
+          </MenuItem>
+          <MenuItem disabled={!props.canSplit} onClick={props.onSplitDown}>
+            <Rows2 />
+            Split tab down
+          </MenuItem>
+          <MenuItem onClick={props.onClose}>
+            <XIcon />
+            Close panel
+          </MenuItem>
+        </MenuPopup>
+      </Menu>
+      {props.maximized ? null : (
+        <GroupControlButton
+          label="Minimize panel"
+          disabledReason={props.minimizeBlockedReason}
+          onClick={props.onMinimize}
+        >
+          <Minus className="size-3.5" />
+        </GroupControlButton>
+      )}
+      <GroupControlButton
+        label={props.maximized ? "Restore panel" : "Maximize panel"}
+        pressed={props.maximized}
+        onClick={props.onToggleMaximized}
+      >
+        {props.maximized ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
+      </GroupControlButton>
+      <GroupControlButton label="Close panel" onClick={props.onClose}>
+        <XIcon className="size-3.5" />
+      </GroupControlButton>
+    </div>
+  );
+}
+
+const DROP_INDICATOR_CLASS: Record<RightPanelDropZone, string> = {
+  left: "inset-y-0 left-0 w-1/2",
+  right: "inset-y-0 right-0 w-1/2",
+  top: "inset-x-0 top-0 h-1/2",
+  bottom: "inset-x-0 bottom-0 h-1/2",
+  center: "inset-0",
+  tabs: "inset-0",
+};
+
+function RightPanelGroupView(props: {
+  panel: RightPanelTabsProps;
+  groupId: string | null;
+  surfaces: readonly RightPanelSurface[];
+  activeSurfaceId: string | null;
+  ownsDesktopTitleBar: boolean;
+  topRight: boolean;
+  maximized: boolean;
+  groupControls: ReactNode;
+  layoutControls: ReactNode;
+  addMenuOpen: boolean;
+  onAddMenuOpenChange: (open: boolean) => void;
+  renamingSurface: string | null;
+  tabHandlers: RightPanelTabHandlers;
+  theme: "light" | "dark";
+  browserProfiles: ReadonlyArray<{ readonly id: string; readonly name: string }>;
+  dropIndicator: RightPanelDropIndicator | null;
+  dragActive: boolean;
+  focused: boolean;
+  onFocus: (() => void) | undefined;
+  children: ReactNode;
+}) {
+  const { panel } = props;
+  const tabListRef = useRef<HTMLDivElement>(null);
+  const [tabScrollState, setTabScrollState] = useState({
+    hasOverflow: false,
+    canScrollLeft: false,
+    canScrollRight: false,
+  });
 
   const updateTabScrollState = (viewport: HTMLDivElement) => {
     const hasOverflow = viewport.scrollWidth - viewport.clientWidth > TAB_SCROLL_EDGE_TOLERANCE;
@@ -1106,189 +1873,6 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
       behavior: reduceMotion ? "auto" : "smooth",
     });
   };
-
-  const addSurfaceActions = [
-    {
-      label: "Browser",
-      icon: Globe2,
-      shortcut: "B",
-      available: props.browserAvailable,
-      disabledReason: SURFACE_DISABLED_REASONS.browser,
-      onClick: props.onAddBrowser,
-    },
-    {
-      label: "Terminal",
-      icon: TerminalSquare,
-      shortcut: "T",
-      available: props.terminalAvailable,
-      disabledReason: SURFACE_DISABLED_REASONS.terminal,
-      onClick: props.onAddTerminal,
-    },
-    {
-      label: "Files",
-      icon: Files,
-      shortcut: "F",
-      available: props.filesAvailable,
-      disabledReason: SURFACE_DISABLED_REASONS.files,
-      onClick: props.onAddFiles,
-    },
-    {
-      label: "Diff",
-      icon: FileDiff,
-      shortcut: "D",
-      available: props.diffAvailable,
-      disabledReason: SURFACE_DISABLED_REASONS.diff,
-      onClick: props.onAddDiff,
-    },
-    {
-      label: "Pull request",
-      icon: PullRequestGlyph.pullRequest,
-      shortcut: "P",
-      available: props.pullRequestAvailable,
-      disabledReason: SURFACE_DISABLED_REASONS.pullRequest,
-      onClick: props.onAddPullRequest,
-    },
-    {
-      label: "Linked pull requests",
-      icon: PullRequestGlyph.link,
-      shortcut: "L",
-      available: props.pullRequestsAvailable,
-      disabledReason: SURFACE_DISABLED_REASONS.pullRequests,
-      onClick: props.onAddPullRequests,
-    },
-    {
-      label: "Device",
-      icon: Smartphone,
-      shortcut: "M",
-      available: props.deviceAvailable,
-      disabledReason: SURFACE_DISABLED_REASONS.device,
-      onClick: props.onAddDevice,
-    },
-    ...(props.onAddSideChat
-      ? [
-          {
-            label: "Side chat",
-            icon: MessagesSquare,
-            shortcut: "S",
-            available: props.sideChatAvailable === true && !props.sideChatDisabledReason,
-            disabledReason: props.sideChatDisabledReason ?? SURFACE_DISABLED_REASONS.sideChat,
-            onClick: props.onAddSideChat,
-          },
-        ]
-      : []),
-  ] as const;
-
-  const handleAddSurfaceMenuKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-    const action = surfaceShortcutActionForKey(addSurfaceActions, event.nativeEvent);
-    if (!action) return;
-    event.preventDefault();
-    event.stopPropagation();
-    setAddSurfaceMenuOpen(false);
-    action.onClick();
-  };
-
-  const handleTabContextMenu = async (event: ReactMouseEvent, surface: RightPanelSurface) => {
-    event.preventDefault();
-    event.stopPropagation();
-
-    const api = readLocalApi();
-    if (!api) return;
-
-    const surfaceIndex = props.surfaces.findIndex((entry) => entry.id === surface.id);
-    if (surfaceIndex < 0) return;
-
-    const items: ContextMenuItem<TabContextMenuAction>[] = [];
-    if ((surface.kind === "device" || surface.kind === "terminal") && props.onRenameSurface)
-      items.push({ id: "rename", label: "Rename" });
-    if (surface.kind === "file" && surface.attachment === undefined) {
-      items.push({ id: "copy-path", label: "Copy path" });
-    }
-    const menuPreviewTabId = previewTabIdOf(surface, props.previewSessions);
-    const menuOverlay = menuPreviewTabId ? (props.desktopByTabId[menuPreviewTabId] ?? null) : null;
-    const menuMuted = menuOverlay?.audioMuted ?? false;
-    if (surface.kind === "preview") {
-      items.push({
-        id: "toggle-mute",
-        ...tabMuteMenuItem({
-          overlay: menuOverlay,
-          canResolveRuntimeTabId: props.previewRuntimeTabId !== undefined,
-        }),
-      });
-    }
-    items.push(
-      { id: "close", label: "Close" },
-      {
-        id: "close-others",
-        label: "Close others",
-        disabled: props.surfaces.length <= 1,
-      },
-      {
-        id: "close-to-right",
-        label: "Close to the right",
-        disabled: surfaceIndex >= props.surfaces.length - 1,
-      },
-      {
-        id: "close-all",
-        label: "Close all",
-        disabled: props.surfaces.length === 0,
-      },
-    );
-
-    const action = await api.contextMenu.show(items, { x: event.clientX, y: event.clientY });
-    switch (action) {
-      case "rename":
-        setRenamingSurface(surface.id);
-        break;
-      case "copy-path":
-        if (surface.kind === "file" && surface.attachment === undefined) {
-          props.onCopyFilePath(surface.relativePath);
-        }
-        break;
-      case "toggle-mute": {
-        const runtimeTabId =
-          menuPreviewTabId && menuOverlay
-            ? (props.previewRuntimeTabId?.(menuPreviewTabId) ?? null)
-            : null;
-        if (runtimeTabId) {
-          void previewBridge?.setAudioMuted(runtimeTabId, !menuMuted).catch(() => undefined);
-        }
-        break;
-      }
-      case "close":
-        props.onCloseSurface(surface);
-        break;
-      case "close-others":
-        props.onCloseOtherSurfaces(surface);
-        break;
-      case "close-to-right":
-        props.onCloseSurfacesToRight(surface);
-        break;
-      case "close-all":
-        props.onCloseAllSurfaces();
-        break;
-      case null:
-        break;
-    }
-  };
-  const handleTabAuxClick = (event: ReactMouseEvent, surface: RightPanelSurface) => {
-    if (event.button !== 1) return;
-    event.preventDefault();
-    event.stopPropagation();
-    props.onCloseSurface(surface);
-  };
-  const onActivateTab = useStableCallback(props.onActivate);
-  const onCloseTab = useStableCallback(props.onCloseSurface);
-  const onTabAuxClick = useStableCallback(handleTabAuxClick);
-  const onTabContextMenu = useStableCallback(
-    (event: ReactMouseEvent, surface: RightPanelSurface) => {
-      void handleTabContextMenu(event, surface);
-    },
-  );
-  const onStartRenameTab = useStableCallback((surfaceId: string) => setRenamingSurface(surfaceId));
-  const onFinishRenameTab = useStableCallback((surfaceId: string, title: string) => {
-    props.onRenameSurface?.(surfaceId, title);
-    setRenamingSurface(null);
-  });
 
   // A newly active tab, or tabs that start overflowing, can sit outside the scrolled strip.
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- scrolls the active tab DOM node into view after it changes or the tab strip starts overflowing
@@ -1333,36 +1917,24 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
     };
   };
 
+  const indicator = props.dropIndicator;
   return (
-    <PreviewPanelShell
-      workspaceArea
-      workspaceFocusKey={`panel:${props.environmentId}:${props.activeSurfaceId ?? "empty"}`}
-      workspaceLabel={
-        focusedSurface
-          ? `Workspace panel: ${surfaceTitle(focusedSurface, props.previewSessions, props.terminalLabelsById, props.planTitlesById)}`
-          : "Workspace panel"
-      }
-      mode={props.mode}
-      {...(props.maximized !== undefined ? { maximized: props.maximized } : {})}
-      {...(props.open !== undefined ? { open: props.open } : {})}
-      {...(props.widthStorageKey !== undefined ? { widthStorageKey: props.widthStorageKey } : {})}
-      {...(props.defaultWidth !== undefined ? { defaultWidth: props.defaultWidth } : {})}
-      {...(props.inlineSize ? { inlineSize: props.inlineSize } : {})}
-      onMouseDown={preventThumbButtonFocus}
-      onMouseUp={(event) =>
-        takeThumbButtonNavigation(
-          event,
-          focusedSurface?.kind === "preview" ? dispatchPreviewAction : undefined,
-        )
-      }
+    <div
+      className="relative flex min-h-0 min-w-0 flex-1 flex-col"
+      data-right-panel-group={props.groupId ?? undefined}
+      data-right-panel-group-focused={props.focused ? "true" : undefined}
+      onPointerDownCapture={props.onFocus}
+      onFocusCapture={props.onFocus}
     >
       <div
         className={cn(
-          "flex h-[var(--workspace-topbar-height)] min-h-[var(--workspace-topbar-height)] shrink-0 items-center gap-1 pl-2",
-          props.mode === "inline" && !props.layoutControls ? "pr-28" : "pr-3",
-          ownsDesktopTitleBar && "drag-region",
-          ownsDesktopTitleBar && "wco:pr-(--workspace-native-controls-inset)",
-          props.mode === "inline" && props.maximized && COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS,
+          "relative flex h-[var(--workspace-topbar-height)] min-h-[var(--workspace-topbar-height)] shrink-0 items-center gap-1 pl-2",
+          props.topRight && panel.mode === "inline" && !props.layoutControls ? "pr-28" : "pr-3",
+          props.ownsDesktopTitleBar && "drag-region",
+          props.ownsDesktopTitleBar &&
+            props.topRight &&
+            "wco:pr-(--workspace-native-controls-inset)",
+          panel.mode === "inline" && props.maximized && COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS,
         )}
         data-right-panel-tabbar
       >
@@ -1375,124 +1947,53 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
           data-right-panel-tab-list
         >
           <div className="flex h-full w-max min-w-full items-center gap-1">
-            <SortableTabList surfaces={props.surfaces} onMove={props.onMoveSurface}>
+            <SortableTabList surfaceIds={props.surfaces.map((surface) => surface.id)}>
               {props.surfaces.map((surface) => {
-                const previewTabId = previewTabIdOf(surface, props.previewSessions);
+                const previewTabId = previewTabIdOf(surface, panel.previewSessions);
                 const favicon = previewFaviconOf(
                   surface,
-                  props.previewSessions,
-                  props.desktopByTabId,
+                  panel.previewSessions,
+                  panel.desktopByTabId,
                 );
                 return (
                   <RightPanelTab
                     key={surface.id}
                     surface={surface}
-                    dragDisabled={!props.onMoveSurface || renamingSurface === surface.id}
+                    dragDisabled={!panel.onMoveSurface || props.renamingSurface === surface.id}
                     active={surface.id === props.activeSurfaceId}
-                    pending={props.pendingSurfaceIds.has(surface.id)}
+                    pending={panel.pendingSurfaceIds.has(surface.id)}
                     title={surfaceTitle(
                       surface,
-                      props.previewSessions,
-                      props.terminalLabelsById,
-                      props.planTitlesById,
+                      panel.previewSessions,
+                      panel.terminalLabelsById,
+                      panel.planTitlesById,
                     )}
                     audio={tabAudioState(
-                      previewTabId ? (props.desktopByTabId[previewTabId] ?? null) : null,
+                      previewTabId ? (panel.desktopByTabId[previewTabId] ?? null) : null,
                     )}
                     audioRuntimeTabId={
-                      previewTabId ? (props.previewRuntimeTabId?.(previewTabId) ?? null) : null
+                      previewTabId ? (panel.previewRuntimeTabId?.(previewTabId) ?? null) : null
                     }
                     previewUrl={favicon.url}
                     previewCapturedUrl={favicon.capturedUrl}
-                    theme={resolvedTheme}
-                    environmentId={props.environmentId}
-                    pullRequestStatusSeed={props.pullRequestStatusSeeds?.[surface.id]}
-                    renaming={renamingSurface === surface.id}
-                    canRename={props.onRenameSurface !== undefined}
-                    ownsDesktopTitleBar={ownsDesktopTitleBar}
-                    onActivate={onActivateTab}
-                    onClose={onCloseTab}
-                    onAuxClick={onTabAuxClick}
-                    onContextMenu={onTabContextMenu}
-                    onStartRename={onStartRenameTab}
-                    onFinishRename={onFinishRenameTab}
+                    theme={props.theme}
+                    environmentId={panel.environmentId}
+                    pullRequestStatusSeed={panel.pullRequestStatusSeeds?.[surface.id]}
+                    renaming={props.renamingSurface === surface.id}
+                    canRename={panel.onRenameSurface !== undefined}
+                    ownsDesktopTitleBar={props.ownsDesktopTitleBar}
+                    {...props.tabHandlers}
                   />
                 );
               })}
             </SortableTabList>
-            {props.open !== false ? (
-              <Menu open={addSurfaceMenuOpen} onOpenChange={setAddSurfaceMenuOpen}>
-                <MenuTrigger
-                  ref={addSurfaceTriggerRef}
-                  render={
-                    <Button
-                      aria-label="Add panel surface"
-                      className="shrink-0"
-                      size="icon-xs"
-                      variant="ghost-muted"
-                    />
-                  }
-                >
-                  <Plus className="size-3.5" />
-                </MenuTrigger>
-                <MenuPopup
-                  align="start"
-                  side="bottom"
-                  sideOffset={6}
-                  onKeyDownCapture={handleAddSurfaceMenuKeyDown}
-                >
-                  {addSurfaceActions.map((action) => {
-                    const Icon = action.icon;
-                    if (action.label === "Browser" && action.available) {
-                      return (
-                        <MenuSub key={action.label}>
-                          <MenuSubTrigger
-                            className="[&>svg:last-child]:ms-0"
-                            aria-keyshortcuts={action.shortcut}
-                            onClick={(event) => {
-                              const pointerType =
-                                "pointerType" in event.nativeEvent &&
-                                typeof event.nativeEvent.pointerType === "string"
-                                  ? event.nativeEvent.pointerType
-                                  : undefined;
-                              if (!shouldOpenDefaultBrowserProfileFromMenuClick(pointerType))
-                                return;
-                              setAddSurfaceMenuOpen(false);
-                              action.onClick();
-                            }}
-                          >
-                            <Icon />
-                            {action.label}
-                            <MenuShortcut>{action.shortcut}</MenuShortcut>
-                          </MenuSubTrigger>
-                          <MenuSubPopup className="max-w-56">
-                            {browserProfiles.map((profile) => (
-                              <MenuItem
-                                key={profile.id}
-                                onClick={() => props.onAddBrowserInProfile(profile.id)}
-                              >
-                                <span className="min-w-0 truncate">{profile.name}</span>
-                              </MenuItem>
-                            ))}
-                          </MenuSubPopup>
-                        </MenuSub>
-                      );
-                    }
-                    return (
-                      <SurfaceMenuItem
-                        key={action.label}
-                        available={action.available}
-                        disabledReason={action.disabledReason}
-                        shortcut={action.shortcut}
-                        onClick={action.onClick}
-                      >
-                        <Icon />
-                        {action.label}
-                      </SurfaceMenuItem>
-                    );
-                  })}
-                </MenuPopup>
-              </Menu>
+            {panel.open !== false ? (
+              <AddSurfaceMenu
+                panel={panel}
+                open={props.addMenuOpen}
+                onOpenChange={props.onAddMenuOpenChange}
+                browserProfiles={props.browserProfiles}
+              />
             ) : null}
           </div>
         </ScrollArea>
@@ -1540,45 +2041,204 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             </Tooltip>
           </div>
         ) : null}
+        {props.groupControls}
         {props.layoutControls}
-        {ownsDesktopTitleBar && !props.layoutControls ? (
+        {props.ownsDesktopTitleBar && props.topRight && !props.layoutControls ? (
           <span aria-hidden className="hidden w-24 shrink-0 wco:block" />
         ) : null}
-        {ownsDesktopTitleBar ? (
+        {props.ownsDesktopTitleBar && props.topRight ? (
           <span
             aria-hidden
             className="pointer-events-none fixed top-[var(--workspace-controls-top)] right-[var(--workspace-controls-right)] h-[var(--workspace-topbar-height)] w-28 [-webkit-app-region:no-drag]"
           />
         ) : null}
-      </div>
-      <div className="flex min-h-0 flex-1 flex-col" data-right-panel-surface-content>
-        {props.activeSurfaceId === null ? (
-          <RightPanelEmptyState
-            onAddBrowser={props.onAddBrowser}
-            onAddBrowserInProfile={props.onAddBrowserInProfile}
-            browserProfiles={browserProfiles}
-            onAddTerminal={props.onAddTerminal}
-            onAddDiff={props.onAddDiff}
-            onAddFiles={props.onAddFiles}
-            onAddPullRequest={props.onAddPullRequest}
-            onAddPullRequests={props.onAddPullRequests}
-            onAddDevice={props.onAddDevice}
-            onAddSideChat={props.onAddSideChat}
-            browserAvailable={props.browserAvailable}
-            terminalAvailable={props.terminalAvailable}
-            diffAvailable={props.diffAvailable}
-            filesAvailable={props.filesAvailable}
-            pullRequestAvailable={props.pullRequestAvailable}
-            pullRequestsAvailable={props.pullRequestsAvailable}
-            deviceAvailable={props.deviceAvailable}
-            sideChatAvailable={props.sideChatAvailable === true}
-            sideChatDisabledReason={props.sideChatDisabledReason ?? null}
+        {indicator?.zone === "tabs" ? (
+          <span
+            aria-hidden
+            data-right-panel-drop-indicator="tabs"
+            className="pointer-events-none absolute inset-0 rounded-sm ring-2 ring-inset ring-primary/60"
           />
-        ) : (
-          props.children
-        )}
+        ) : null}
       </div>
-    </PreviewPanelShell>
+      <div className="relative flex min-h-0 flex-1 flex-col" data-right-panel-surface-content>
+        {props.children}
+        {props.dragActive && props.groupId !== null ? (
+          // Covers the content during a drag so iframes and canvases cannot eat the pointer.
+          <div aria-hidden className="absolute inset-0 z-40" />
+        ) : null}
+        {indicator && indicator.zone !== "tabs" ? (
+          <div
+            aria-hidden
+            data-right-panel-drop-indicator={indicator.zone}
+            className={cn(
+              "pointer-events-none absolute z-50 rounded-md border-2 border-primary/70 bg-primary/10",
+              DROP_INDICATOR_CLASS[indicator.zone],
+            )}
+          />
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function AddSurfaceMenu(props: {
+  panel: RightPanelTabsProps;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  browserProfiles: ReadonlyArray<{ readonly id: string; readonly name: string }>;
+}) {
+  const { panel } = props;
+  const addSurfaceActions = [
+    {
+      label: "Browser",
+      icon: Globe2,
+      shortcut: "B",
+      available: panel.browserAvailable,
+      disabledReason: SURFACE_DISABLED_REASONS.browser,
+      onClick: panel.onAddBrowser,
+    },
+    {
+      label: "Terminal",
+      icon: TerminalSquare,
+      shortcut: "T",
+      available: panel.terminalAvailable,
+      disabledReason: SURFACE_DISABLED_REASONS.terminal,
+      onClick: panel.onAddTerminal,
+    },
+    {
+      label: "Files",
+      icon: Files,
+      shortcut: "F",
+      available: panel.filesAvailable,
+      disabledReason: SURFACE_DISABLED_REASONS.files,
+      onClick: panel.onAddFiles,
+    },
+    {
+      label: "Diff",
+      icon: FileDiff,
+      shortcut: "D",
+      available: panel.diffAvailable,
+      disabledReason: SURFACE_DISABLED_REASONS.diff,
+      onClick: panel.onAddDiff,
+    },
+    {
+      label: "Pull request",
+      icon: PullRequestGlyph.pullRequest,
+      shortcut: "P",
+      available: panel.pullRequestAvailable,
+      disabledReason: SURFACE_DISABLED_REASONS.pullRequest,
+      onClick: panel.onAddPullRequest,
+    },
+    {
+      label: "Linked pull requests",
+      icon: PullRequestGlyph.link,
+      shortcut: "L",
+      available: panel.pullRequestsAvailable,
+      disabledReason: SURFACE_DISABLED_REASONS.pullRequests,
+      onClick: panel.onAddPullRequests,
+    },
+    {
+      label: "Device",
+      icon: Smartphone,
+      shortcut: "M",
+      available: panel.deviceAvailable,
+      disabledReason: SURFACE_DISABLED_REASONS.device,
+      onClick: panel.onAddDevice,
+    },
+    ...(panel.onAddSideChat
+      ? [
+          {
+            label: "Side chat",
+            icon: MessagesSquare,
+            shortcut: "S",
+            available: panel.sideChatAvailable === true && !panel.sideChatDisabledReason,
+            disabledReason: panel.sideChatDisabledReason ?? SURFACE_DISABLED_REASONS.sideChat,
+            onClick: panel.onAddSideChat,
+          },
+        ]
+      : []),
+  ] as const;
+
+  const handleAddSurfaceMenuKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const action = surfaceShortcutActionForKey(addSurfaceActions, event.nativeEvent);
+    if (!action) return;
+    event.preventDefault();
+    event.stopPropagation();
+    props.onOpenChange(false);
+    action.onClick();
+  };
+
+  return (
+    <Menu open={props.open} onOpenChange={props.onOpenChange}>
+      <MenuTrigger
+        render={
+          <Button
+            aria-label="Add panel surface"
+            className="shrink-0"
+            size="icon-xs"
+            variant="ghost-muted"
+          />
+        }
+      >
+        <Plus className="size-3.5" />
+      </MenuTrigger>
+      <MenuPopup
+        align="start"
+        side="bottom"
+        sideOffset={6}
+        onKeyDownCapture={handleAddSurfaceMenuKeyDown}
+      >
+        {addSurfaceActions.map((action) => {
+          const Icon = action.icon;
+          if (action.label === "Browser" && action.available) {
+            return (
+              <MenuSub key={action.label}>
+                <MenuSubTrigger
+                  className="[&>svg:last-child]:ms-0"
+                  aria-keyshortcuts={action.shortcut}
+                  onClick={(event) => {
+                    const pointerType =
+                      "pointerType" in event.nativeEvent &&
+                      typeof event.nativeEvent.pointerType === "string"
+                        ? event.nativeEvent.pointerType
+                        : undefined;
+                    if (!shouldOpenDefaultBrowserProfileFromMenuClick(pointerType)) return;
+                    props.onOpenChange(false);
+                    action.onClick();
+                  }}
+                >
+                  <Icon />
+                  {action.label}
+                  <MenuShortcut>{action.shortcut}</MenuShortcut>
+                </MenuSubTrigger>
+                <MenuSubPopup className="max-w-56">
+                  {props.browserProfiles.map((profile) => (
+                    <MenuItem
+                      key={profile.id}
+                      onClick={() => panel.onAddBrowserInProfile(profile.id)}
+                    >
+                      <span className="min-w-0 truncate">{profile.name}</span>
+                    </MenuItem>
+                  ))}
+                </MenuSubPopup>
+              </MenuSub>
+            );
+          }
+          return (
+            <SurfaceMenuItem
+              key={action.label}
+              available={action.available}
+              disabledReason={action.disabledReason}
+              shortcut={action.shortcut}
+              onClick={action.onClick}
+            >
+              <Icon />
+              {action.label}
+            </SurfaceMenuItem>
+          );
+        })}
+      </MenuPopup>
+    </Menu>
   );
 }
 

@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef, useState, type ComponentProps, type CSSProperties } from "react";
+import { useChatPane } from "../../splitView/chatPane";
 import { useStore } from "zustand";
 import { ChatCanvasContext } from "./ChatCanvasContext";
 import type { ChatCanvasPreview } from "./chatCanvasLayout";
@@ -67,6 +68,7 @@ export function ChatCanvas({
     if (timelineElement) observed.push(timelineElement);
     return observeResize(observed, measure);
   }, [store, composerOverlayElement, timelineElement, detailsCardTopInset]);
+  const inSplitPane = useChatPane() !== null;
   const detailsCardInlineOpen = useRightPanelStore((state) =>
     threadRef === null
       ? false
@@ -78,6 +80,7 @@ export function ChatCanvas({
     threadRef,
     preview,
     detailsCardInlineOpen,
+    inlineDetailsCardAllowed: !inSplitPane,
   });
   const context = {
     container: model.container,

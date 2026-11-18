@@ -12,6 +12,7 @@ import {
   selectActiveRightPanel,
   selectActiveRightPanelSurface,
   selectThreadPanelVisibility,
+  selectThreadRightPanelLayout,
   selectThreadRightPanelState,
   useRightPanelStore,
 } from "./rightPanelStore";
@@ -23,6 +24,7 @@ beforeEach(() => {
   useClosedViewStore.setState({ entries: [] });
   useRightPanelStore.setState({
     byThreadKey: {},
+    layoutByThreadKey: {},
     threadPanelVisibilityByThreadKey: {},
     userActionRevisionByThreadKey: {},
     closeRevisionByThreadKey: {},
@@ -40,7 +42,7 @@ async function reloadRightPanelStore() {
 }
 
 describe("rightPanelStore", () => {
-  it("persists custom terminal names through v15 migration", async () => {
+  it("persists custom terminal names through the v16 store", async () => {
     const store = useRightPanelStore.getState();
     store.openTerminal(refA, "terminal-1");
     store.renameSurface(refA, "terminal:terminal-1", " Build ");
@@ -52,7 +54,7 @@ describe("rightPanelStore", () => {
       byThreadKey: useRightPanelStore.getState().byThreadKey,
     });
     expect(migrated.byThreadKey).toEqual(useRightPanelStore.getState().byThreadKey);
-    expect(useRightPanelStore.persist.getOptions().version).toBe(15);
+    expect(useRightPanelStore.persist.getOptions().version).toBe(16);
     store.renameSurface(refA, "terminal:terminal-1", " ");
     const terminal = selectActiveRightPanelSurface(useRightPanelStore.getState().byThreadKey, refA);
     expect(terminal).not.toHaveProperty("title");
@@ -1377,5 +1379,230 @@ describe("rightPanelStore", () => {
     store.reconcileBrowserSurfaces(refA, ["tab-a", "tab-b"]);
     expect(surfaceIds()).toEqual(["browser:tab-a", "terminal:term-1", "diff", "browser:tab-b"]);
     expect(store.getUserActionRevision(refA)).toBe(revision);
+  });
+
+  describe("layout", () => {
+    const layout = () => selectThreadRightPanelLayout(useRightPanelStore.getState(), refA);
+    const thread = () =>
+      selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA);
+    const groups = () =>
+      layout().columns.map((column) => column.groups.map((group) => group.surfaceIds.join(",")));
+
+    it("reads a v15 thread as one column with one group and the same active tab", () => {
+      const migrated = migratePersistedRightPanelState({
+        byThreadKey: {
+          "env-1:thread-A": {
+            isOpen: true,
+            activeSurfaceId: "diff",
+            surfaces: [
+              { id: "browser:tab-a", kind: "preview", resourceId: "tab-a" },
+              { id: "diff", kind: "diff" },
+              { id: "terminal:term-1", kind: "terminal", resourceId: "term-1" },
+            ],
+            maximized: true,
+          },
+        },
+        threadPanelVisibilityByThreadKey: {},
+      });
+      expect(migrated).not.toHaveProperty("layoutByThreadKey");
+      const read = selectThreadRightPanelLayout({ ...migrated, layoutByThreadKey: {} }, refA);
+      expect(read.columns).toEqual([
+        {
+          id: "c1",
+          size: 1,
+          groups: [
+            {
+              id: "g1",
+              surfaceIds: ["browser:tab-a", "diff", "terminal:term-1"],
+              activeSurfaceId: "diff",
+              size: 1,
+            },
+          ],
+        },
+      ]);
+      expect(read.focusedGroupId).toBe("g1");
+    });
+
+    it("keeps v16 layouts through migration and drops ids the registry lost", () => {
+      const migrated = migratePersistedRightPanelState({
+        byThreadKey: {
+          "env-1:thread-A": {
+            isOpen: true,
+            activeSurfaceId: "diff",
+            surfaces: [
+              { id: "diff", kind: "diff" },
+              { id: "files", kind: "files" },
+            ],
+          },
+        },
+        layoutByThreadKey: {
+          "env-1:thread-A": {
+            columns: [
+              {
+                id: "c1",
+                size: 0.6,
+                groups: [
+                  { id: "g1", surfaceIds: ["diff", "gone"], activeSurfaceId: "diff", size: 1 },
+                ],
+              },
+              {
+                id: "c2",
+                size: 0.4,
+                groups: [{ id: "g2", surfaceIds: ["files"], activeSurfaceId: "files", size: 1 }],
+              },
+            ],
+            focusedGroupId: "g1",
+            minimized: [],
+          },
+          "env-1:missing-thread": { columns: [], focusedGroupId: null, minimized: [] },
+        },
+      });
+      expect(Object.keys(migrated.layoutByThreadKey ?? {})).toEqual(["env-1:thread-A"]);
+      expect(
+        migrated.layoutByThreadKey?.["env-1:thread-A"]?.columns.map((column) => [
+          column.size,
+          column.groups[0]!.surfaceIds,
+        ]),
+      ).toEqual([
+        [0.6, ["diff"]],
+        [0.4, ["files"]],
+      ]);
+    });
+
+    it("persists columns, sizes and focus per thread", async () => {
+      const store = useRightPanelStore.getState();
+      store.open(refA, "diff");
+      store.open(refA, "files");
+      store.moveSurfaceTo(refA, "files", { kind: "column", groupId: "g1", side: "right" });
+      store.resizeColumns(refA, [3, 1]);
+      store.open(refB, "diff");
+      await reloadRightPanelStore();
+      expect(groups()).toEqual([["diff"], ["files"]]);
+      expect(layout().columns.map((column) => column.size)).toEqual([0.75, 0.25]);
+      expect(thread().activeSurfaceId).toBe("files");
+      expect(
+        selectThreadRightPanelLayout(useRightPanelStore.getState(), refB).columns,
+      ).toHaveLength(1);
+    });
+
+    it("opens every new surface as a tab of the focused group", () => {
+      const store = useRightPanelStore.getState();
+      store.open(refA, "diff");
+      store.openTerminal(refA, "term-1");
+      store.moveSurfaceTo(refA, "terminal:term-1", { kind: "split", groupId: "g1", side: "below" });
+      store.focusGroup(refA, "g1");
+      store.openFile(refA, "src/a.ts");
+      expect(groups()).toEqual([["diff,file:src/a.ts", "terminal:term-1"]]);
+      expect(thread().activeSurfaceId).toBe("file:src/a.ts");
+      // Activating a tab of another group focuses that group.
+      store.activateSurface(refA, "terminal:term-1");
+      expect(layout().focusedGroupId).toBe("g2");
+      store.openPlan(refA, PlanId.make("plan-1"));
+      expect(groups()).toEqual([["diff,file:src/a.ts", "terminal:term-1,plan:plan-1"]]);
+    });
+
+    it("scopes close-others, close-to-right and close-all to the tab's group", () => {
+      const store = useRightPanelStore.getState();
+      store.open(refA, "diff");
+      store.open(refA, "files");
+      store.openTerminal(refA, "term-1");
+      store.openTerminal(refA, "term-2");
+      store.moveSurfaceTo(refA, "terminal:term-1", {
+        kind: "column",
+        groupId: "g1",
+        side: "right",
+      });
+      store.moveSurfaceTo(refA, "terminal:term-2", { kind: "join", groupId: "g2" });
+      store.closeOtherSurfaces(refA, "diff");
+      expect(groups()).toEqual([["diff"], ["terminal:term-1,terminal:term-2"]]);
+      store.closeSurfacesToRight(refA, "terminal:term-1");
+      expect(groups()).toEqual([["diff"], ["terminal:term-1"]]);
+      store.closeAllSurfaces(refA, "g2");
+      expect(groups()).toEqual([["diff"]]);
+      expect(thread()).toMatchObject({ isOpen: true, activeSurfaceId: "diff" });
+    });
+
+    it("maximizes one group and restores it with the same control", () => {
+      const store = useRightPanelStore.getState();
+      store.open(refA, "diff");
+      store.open(refA, "files");
+      store.moveSurfaceTo(refA, "files", { kind: "column", groupId: "g1", side: "right" });
+      store.toggleGroupMaximized(refA, "g1");
+      expect(thread().maximized).toBe(true);
+      expect(layout()).toMatchObject({ maximizedGroupId: "g1", focusedGroupId: "g1" });
+      store.toggleGroupMaximized(refA, "g1");
+      expect(thread().maximized).toBeUndefined();
+      expect(layout()).not.toHaveProperty("maximizedGroupId");
+      // The legacy request plumbing maximizes the focused group.
+      store.focusGroup(refA, "g2");
+      store.setMaximized(refA, true);
+      expect(layout().maximizedGroupId).toBe("g2");
+      store.closeGroup(refA, "g2");
+      expect(layout()).not.toHaveProperty("maximizedGroupId");
+    });
+
+    it("minimizes the last group out of the panel and restores it in place", () => {
+      const store = useRightPanelStore.getState();
+      store.open(refA, "diff");
+      store.openTerminal(refA, "term-1");
+      store.moveSurfaceTo(refA, "terminal:term-1", { kind: "column", groupId: "g1", side: "left" });
+      store.minimizeGroup(refA, "g2");
+      expect(groups()).toEqual([["diff"]]);
+      expect(thread()).toMatchObject({ isOpen: true, activeSurfaceId: "diff" });
+      store.minimizeGroup(refA, "g1");
+      expect(thread()).toMatchObject({ isOpen: false, activeSurfaceId: null });
+      expect(layout().minimized.map((entry) => entry.group.id)).toEqual(["g2", "g1"]);
+      expect(thread().surfaces).toHaveLength(2);
+
+      store.restoreGroup(refA, "g2");
+      expect(thread()).toMatchObject({ isOpen: true, activeSurfaceId: "terminal:term-1" });
+      store.restoreGroup(refA, "g1");
+      expect(groups()).toEqual([["terminal:term-1"], ["diff"]]);
+
+      store.minimizeGroup(refA, "g2");
+      store.minimizeGroup(refA, "g1");
+      store.toggleVisibility(refA);
+      expect(thread().isOpen).toBe(true);
+      expect(groups()).toEqual([]);
+      expect(layout().minimized).toHaveLength(2);
+    });
+
+    it("closes a minimized card through the closed-view flow", async () => {
+      const store = useRightPanelStore.getState();
+      store.open(refA, "diff");
+      store.openTerminal(refA, "term-1");
+      store.moveSurfaceTo(refA, "terminal:term-1", {
+        kind: "column",
+        groupId: "g1",
+        side: "right",
+      });
+      store.minimizeGroup(refA, "g2");
+      store.closeGroup(refA, "g2");
+      expect(layout().minimized).toEqual([]);
+      expect(thread().surfaces.map((surface) => surface.id)).toEqual(["diff"]);
+      const view = useClosedViewStore.getState().entries[0]!;
+      expect(view).toMatchObject({ kind: "panel-tab", surface: { id: "terminal:term-1" } });
+      await reopenClosedView(view, {
+        workspaceAvailable: true,
+        openPreview: async () => {
+          throw new Error("unexpected preview");
+        },
+      });
+      expect(groups()).toEqual([["diff,terminal:term-1"]]);
+    });
+
+    it("restores a minimized group when an open path activates one of its tabs", () => {
+      const store = useRightPanelStore.getState();
+      store.open(refA, "diff");
+      store.open(refA, "files");
+      store.moveSurfaceTo(refA, "files", { kind: "column", groupId: "g1", side: "right" });
+      store.minimizeGroup(refA, "g2");
+      store.selectGroupSurface(refA, "g2", "files");
+      expect(layout().minimized).toHaveLength(1);
+      store.toggle(refA, "files");
+      expect(layout().minimized).toEqual([]);
+      expect(groups()).toEqual([["diff"], ["files"]]);
+      expect(thread().activeSurfaceId).toBe("files");
+    });
   });
 });

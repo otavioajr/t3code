@@ -5,6 +5,7 @@ import { userEvent } from "vite-plus/test/browser";
 
 import { surfaceShortcutKey } from "~/lib/surfaceShortcutKey";
 import { render } from "../../../test/render";
+import { CHAT_PANE_ATTRIBUTE, ChatPaneContext } from "~/splitView/chatPane";
 import type { ChatComposerHandle } from "./ChatComposer";
 import { useChatShortcuts } from "./useChatShortcuts";
 
@@ -47,9 +48,13 @@ function Launcher(props: { keys: string; received: string[] }) {
 
 // The chat's shortcut listener registers when the chat mounts, so a launcher that opens
 // later registers after it. Tests mount the chat first and add the launcher by rerendering.
-function Chat(props: { composerKeys: string[]; launcher?: { keys: string; received: string[] } }) {
+function Chat(props: {
+  composerKeys: string[];
+  launcher?: { keys: string; received: string[] };
+  enabled?: boolean;
+}) {
   useChatShortcuts({
-    enabled: true,
+    enabled: props.enabled ?? true,
     keybindings: [],
     scriptKeybindings: [],
     getShortcutContext: () => shortcutContext,
@@ -186,4 +191,38 @@ it("runs a side chat's composer chords only from its composer, and never thread 
 
   expect(toggles).toEqual(["model"]);
   expect(stops).toEqual([]);
+});
+
+function SplitPane(props: { id: string; focused: boolean; composerKeys: string[] }) {
+  const pane = { paneId: props.id, focused: props.focused, ownsTitleBar: false, close: () => {} };
+  return (
+    <div {...{ [CHAT_PANE_ATTRIBUTE]: props.id }}>
+      <ChatPaneContext value={pane}>
+        {/* An unfocused pane stands down like a background thread. */}
+        <Chat composerKeys={props.composerKeys} enabled={props.focused} />
+        <div tabIndex={0} aria-label={`Pane ${props.id} timeline`} />
+      </ChatPaneContext>
+    </div>
+  );
+}
+
+it("leaves a key pressed in another split pane out of the focused pane's composer", async () => {
+  const paneA: string[] = [];
+  const paneB: string[] = [];
+  await using screen = await render(
+    <>
+      <SplitPane id="a" focused composerKeys={paneA} />
+      <SplitPane id="b" focused={false} composerKeys={paneB} />
+    </>,
+    options,
+  );
+
+  // Pane B's focus claim has not landed yet, so pane A still holds the window's keys.
+  screen.getByLabelText("Pane b timeline").element().focus();
+  await userEvent.keyboard("x");
+  (document.activeElement as HTMLElement | null)?.blur();
+  await userEvent.keyboard("y");
+
+  expect(paneA).toEqual(["y"]);
+  expect(paneB).toEqual([]);
 });

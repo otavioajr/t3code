@@ -1,5 +1,6 @@
 import type {
   EditorId,
+  OrchestrationV2ProviderMcpServer,
   EnvironmentId,
   ProjectId,
   ProjectScript,
@@ -19,7 +20,7 @@ import ProjectScriptsControl, {
   type NewProjectScriptInput,
   type ProjectScriptActionResult,
 } from "../ProjectScriptsControl";
-import { memo, useState, type ComponentProps } from "react";
+import { memo, useState, type ComponentProps, type ReactNode } from "react";
 import { ThreadDetailsCard } from "./ThreadDetailsCard";
 import { OpenInPicker } from "./OpenInPicker";
 import { ThreadDetailsSection } from "./ThreadDetailsSection";
@@ -31,6 +32,7 @@ import {
   ThreadDetailsUsage,
   type ThreadDetailsUsageInput,
 } from "./ThreadDetailsUsage";
+import { ThreadDetailsConnectors } from "./ThreadDetailsConnectors";
 import { ThreadDetailsItemsMenuItems } from "./ThreadDetailsItemsMenu";
 import { resolveThreadDetailsVisibility, THREAD_DETAILS_ITEMS } from "./threadDetailsItems";
 import { useClientSettings } from "../../hooks/useSettings";
@@ -91,6 +93,10 @@ interface ThreadDetailsPanelProps extends Pick<
   ) => Promise<ProjectScriptActionResult>;
   onDeleteProjectScript: (scriptId: string) => Promise<ProjectScriptActionResult>;
   usage: ThreadDetailsUsageInput;
+  /** Minimized right-panel cards, listed below the sections. */
+  minimizedPanels?: ReactNode;
+  /** Null when the provider does not report MCP servers. */
+  mcpServers: ReadonlyArray<OrchestrationV2ProviderMcpServer> | null;
 }
 
 export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
@@ -290,6 +296,10 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
                 <ThreadDetailsContext usage={props.usage.contextWindow} />
               ) : null}
 
+              {visible.connectors && props.mcpServers ? (
+                <ThreadDetailsConnectors servers={props.mcpServers} />
+              ) : null}
+
               {/* Shown only when no section above has content, so an emptied card can be refilled. */}
               <div className="p-2 group-has-[>section>:last-child:not(:empty)]/details-items:hidden">
                 <ThreadDetailsControl
@@ -309,6 +319,8 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
                 </ThreadDetailsControl>
               </div>
             </div>
+
+            {props.minimizedPanels}
 
             <Menu
               open={menuPosition !== null}

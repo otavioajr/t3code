@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef } from "react";
 
 import { acquireBrowserSurface } from "./browserSurfaceStore";
+import { useBrowserSurfaceSuppression } from "./browserSurfaceSuppression";
 import { observeResize } from "../lib/observeResize";
 
 export function BrowserSurfaceSlot(props: {
@@ -12,15 +13,17 @@ export function BrowserSurfaceSlot(props: {
   readonly className?: string;
   readonly fitSourceContent?: boolean;
 }) {
+  const suppressed = useBrowserSurfaceSuppression((state) => state.suppressed);
   const {
     tabId,
-    visible,
+    visible: requestedVisible,
     cornerRadius = 0,
     zIndex = 30,
     layoutVersion,
     className,
     fitSourceContent = false,
   } = props;
+  const visible = requestedVisible && !suppressed;
   const presentationRef = useRef({ visible, cornerRadius, zIndex });
   const updateRef = useRef<(() => void) | null>(null);
 

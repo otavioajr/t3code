@@ -27,6 +27,7 @@ import {
   deriveLatestThreadRun,
   deriveProviderSubagentStatus,
   deriveProviderExtensionStatuses,
+  deriveProviderMcpServers,
   deriveResumableRunId,
   deriveRunlessWorkStartedAt,
   deriveThreadActivityRun,
@@ -79,7 +80,7 @@ function run(id: string, ordinal: number, status: OrchestrationV2RunStatus) {
 }
 
 describe("thread execution presentation", () => {
-  it("shows extension statuses only from the selected provider's current live session", () => {
+  it("shows extension statuses and MCP servers only from the selected provider's current live session", () => {
     const instanceId = v2Projection.thread.modelSelection.instanceId;
     const providerThreadId = ProviderThreadId.make("native-status-thread");
     const sessionId = ProviderSessionId.make("native-status-session");
@@ -148,6 +149,26 @@ describe("thread execution presentation", () => {
       }),
     ).toEqual([]);
     expect(deriveProviderExtensionStatuses(null)).toEqual([]);
+
+    const mcpServers = [{ name: "github", status: "connected" as const }];
+    const reporting = {
+      ...projection,
+      providerSessions: [{ ...projection.providerSessions[0]!, mcpServers }],
+    };
+    expect(deriveProviderMcpServers(reporting)).toEqual(mcpServers);
+    expect(deriveProviderMcpServers(projection)).toBeNull();
+    expect(
+      deriveProviderMcpServers({
+        ...reporting,
+        providerSessions: [{ ...reporting.providerSessions[0]!, status: "error" }],
+      }),
+    ).toBeNull();
+    expect(
+      deriveProviderMcpServers({
+        ...reporting,
+        providerSessions: [{ ...reporting.providerSessions[0]!, status: "stopped" }],
+      }),
+    ).toBeNull();
   });
 
   it("derives the current root failure without inheriting errors from children or previous runs", () => {

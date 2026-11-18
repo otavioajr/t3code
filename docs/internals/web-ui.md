@@ -72,3 +72,41 @@ that calls no hook. Lint misses some bailouts, notably `try` with `finally` and
 compiles every file and fails on any skip. Async handlers rarely need `try`: an
 atom command settles into a result, so cleanup can follow the `await`. `useStableCallback` still
 marks handlers that leave a large component, as described above.
+
+## Right panel layout
+
+A thread's right panel is two levels on purpose: columns, each a stack of tab groups. The
+[layout model](../../apps/web/src/rightPanelLayoutModel.ts) has no general tree. Every Claude
+Desktop-style arrangement fits in two levels, and a fixed depth keeps drop targets, dividers and
+restoring a minimized group unambiguous.
+
+The flat `surfaces` registry and `activeSurfaceId` in
+[rightPanelStore](../../apps/web/src/rightPanelStore.ts) remain the source of truth for which tabs
+exist. Groups hold only ids. Open, close and agent paths keep editing the flat list.
+`reconcileRightPanelLayout` then runs after every store update: it drops closed ids, puts new tabs
+in the focused group, follows activation into the owning group (restoring a minimized one), and
+mirrors the focused group's active tab back into `activeSurfaceId`. New open paths need no layout
+code. Code that reads `activeSurfaceId` sees the focused group's active tab, not every visible tab.
+
+Layouts persist per thread in `layoutByThreadKey`. A thread with no stored layout reads as one
+column with one group, which is how v15 data migrates. Minimized groups leave `columns` but keep
+their tabs in the registry, so closing a card goes through the usual closed-view flow.
+
+Native browser views sit above the DOM and take the pointer. While a tab drag is in progress they
+are hidden through `browserSurfaceSuppression`, or drop zones over a browser group would never see
+the pointer.
+
+## Split view panes
+
+A [split](../../apps/web/src/splitView/splitViewModel.ts) mounts several full `ChatView`s, and
+most chat code was written for one: it listens on `window` and reads `document.activeElement`. The
+route stays the single source of focus: the focused pane shows the routed thread, routing to a
+thread another pane shows focuses that pane, and pointer-down or focus inside a pane routes to its
+thread. An unfocused pane renders under `BackgroundThreadContext`, so listeners gated for Settings
+already stand down there; listeners gated only on `embedded` use the pane's `standDown` instead.
+
+A window listener inside a chat must also pass `chatPaneOwnsTarget`: it acts on events from inside
+its own pane, and on events from outside every pane only when its pane has focus. Without that, a key
+pressed in one pane before its focus claim lands reaches the other pane's composer. Module-level
+singletons keyed by thread (thread find timelines, chat overlays) must hold one entry per shown
+thread, not one for the app.

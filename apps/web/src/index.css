@@ -1839,6 +1839,33 @@ code {
   }
 }
 
+/* Split panes away from the window's top edge or top-right corner keep their headers and
+   controls clear of the native title bar. Each pane is a size container, which also anchors its
+   fixed-position controls to the pane. */
+[data-split-pane-titlebar="false"] {
+  --workspace-controls-right: 0.75rem;
+  --workspace-native-controls-inset: 0px;
+}
+
+[data-split-pane-top="false"] {
+  --workspace-controls-top: 0px;
+}
+
+[data-split-pane-left="false"] {
+  --workspace-titlebar-content-left: var(--workspace-gutter);
+}
+
+[data-split-pane-top="false"] .drag-region {
+  -webkit-app-region: no-drag;
+}
+
+/* A narrow pane keeps its panel toggles in the pane menu instead. */
+@container split-pane (width < 34rem) {
+  [data-workspace-titlebar-controls] {
+    display: none;
+  }
+}
+
 .drag-region button,
 .drag-region input,
 .drag-region textarea,
@@ -2620,6 +2647,13 @@ code {
         3rem + var(--chat-lane-inset-end, 0px) - var(--chat-timeline-gutter, 0px)
       );
     }
+  }
+  /* A minimized side chat card is phone-narrow on any viewport. */
+  [data-minimized-panel-card] .chat-composer-lane {
+    padding-inline: 0.5rem;
+  }
+  [data-minimized-panel-card] [data-chat-canvas] .messages-timeline-scroll {
+    padding-inline: calc(0.5rem - var(--chat-timeline-gutter, 0px));
   }
 }
 

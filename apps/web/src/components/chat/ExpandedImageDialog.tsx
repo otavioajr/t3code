@@ -321,9 +321,9 @@ function closeExpandedImagePreview(): void {
 }
 
 // Leaving the thread's route (or the chat view) drops its preview.
-registerThreadOverlay((threadKey) => {
+registerThreadOverlay((shownThreadKeys) => {
   const current = appAtomRegistry.get(expandedImagePreviewAtom);
-  if (current !== null && current.threadKey !== threadKey) closeExpandedImagePreview();
+  if (current !== null && !shownThreadKeys.has(current.threadKey)) closeExpandedImagePreview();
 });
 
 export function ExpandedImageDialogHost({ threadKey }: { readonly threadKey: string }) {

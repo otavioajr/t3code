@@ -12,7 +12,8 @@ import {
   paceOf,
   remainingPercent,
 } from "@t3tools/shared/usageLimits";
-import type { ReactNode } from "react";
+import { ChevronRightIcon } from "lucide-react";
+import { useState, type ReactNode } from "react";
 
 import { usePrimarySettings } from "../../hooks/useSettings";
 import { useNowMinute } from "../../hooks/useNowMinute";
@@ -22,7 +23,12 @@ import { cn } from "../../lib/utils";
 import { formatUpcomingTimestamp } from "../../timestampFormat";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { formatContextWindowCompactionMessage } from "./compaction.logic";
+import { ThreadDetailsControl } from "./ThreadDetailsControl";
 import { ThreadDetailsSection } from "./ThreadDetailsSection";
+import {
+  THREAD_DETAILS_PANEL_CHEVRON_CLASS,
+  THREAD_DETAILS_PANEL_LABEL_CLASS,
+} from "./threadDetailsPanelStyles";
 
 const PACE_LABEL: Record<LimitPace, string> = {
   ahead: "Ahead of pace",
@@ -82,13 +88,19 @@ export function ThreadDetailsUsage({
   );
 }
 
-/** The thread's context window. The bar fills as context is used; the tick marks auto-compaction. */
+/**
+ * The thread's context window as one summary row; expanding it shows the token row. The bar fills as
+ * context is used; the tick marks auto-compaction.
+ */
 export function ThreadDetailsContext({ usage }: { readonly usage: ContextWindowSnapshot }) {
+  const [open, setOpen] = useState(false);
   const maxTokens = usage.maxTokens != null && usage.maxTokens > 0 ? usage.maxTokens : null;
   const used =
     maxTokens !== null && usage.usedPercentage !== null
       ? Math.round(Math.max(0, Math.min(100, usage.usedPercentage)))
       : null;
+  const tone: UsageTone =
+    used === null ? null : used >= 90 ? "error" : used >= 80 ? "warning" : null;
   const threshold = usage.autoCompactThreshold ?? null;
   const tick =
     maxTokens !== null && threshold !== null && threshold > 0 && threshold < maxTokens
@@ -101,40 +113,106 @@ export function ThreadDetailsContext({ usage }: { readonly usage: ContextWindowS
       title="Context window"
       showHeading={false}
     >
-      <div className="grid grid-cols-[auto_minmax(3rem,1fr)_auto] gap-x-3 text-xs">
-        <UsageRow
+      <div>
+        <ThreadDetailsDisclosure
           label="Context"
-          fill={used}
-          tone={used === null ? null : used >= 90 ? "error" : used >= 80 ? "warning" : null}
-          tick={tick}
-          muted
-          value={
-            maxTokens !== null
-              ? `${usedTokens} / ${formatContextWindowTokens(maxTokens)}`
-              : usedTokens
-          }
-          ariaValue={used !== null ? `${used}% used` : `${usedTokens} tokens used`}
-          tooltip={
-            <>
-              <span className="text-foreground">
-                {used !== null ? `Context: ${used}% used` : `Context: ${usedTokens} tokens used`}
-              </span>
-              {maxTokens !== null ? (
-                <span className="text-muted-foreground">
-                  {usage.usedTokens.toLocaleString("en-US")} of {maxTokens.toLocaleString("en-US")}{" "}
-                  tokens
-                </span>
-              ) : null}
-              {threshold !== null && threshold > 0 ? (
-                <span className="text-muted-foreground">
-                  {formatContextWindowCompactionMessage(threshold)}
-                </span>
-              ) : null}
-            </>
-          }
+          value={used !== null ? `${used}%` : usedTokens}
+          tone={tone}
+          bar={<UsageBar fill={used} tone={tone} tick={tick} muted />}
+          open={open}
+          onOpenChange={setOpen}
         />
+        {open ? (
+          <div className="grid grid-cols-[auto_minmax(3rem,1fr)_auto] gap-x-3 text-xs">
+            <UsageRow
+              label="Tokens"
+              fill={used}
+              tone={tone}
+              tick={tick}
+              muted
+              value={
+                maxTokens !== null
+                  ? `${usedTokens} / ${formatContextWindowTokens(maxTokens)}`
+                  : usedTokens
+              }
+              ariaValue={used !== null ? `${used}% used` : `${usedTokens} tokens used`}
+              tooltip={
+                <>
+                  <span className="text-foreground">
+                    {used !== null
+                      ? `Context: ${used}% used`
+                      : `Context: ${usedTokens} tokens used`}
+                  </span>
+                  {maxTokens !== null ? (
+                    <span className="text-muted-foreground">
+                      {usage.usedTokens.toLocaleString("en-US")} of{" "}
+                      {maxTokens.toLocaleString("en-US")} tokens
+                    </span>
+                  ) : null}
+                  {threshold !== null && threshold > 0 ? (
+                    <span className="text-muted-foreground">
+                      {formatContextWindowCompactionMessage(threshold)}
+                    </span>
+                  ) : null}
+                </>
+              }
+            />
+          </div>
+        ) : null}
       </div>
     </ThreadDetailsSection>
+  );
+}
+
+/** A summary row with a chevron that shows or hides the detail rendered after it. */
+export function ThreadDetailsDisclosure({
+  label,
+  value,
+  tone = null,
+  bar = null,
+  open,
+  onOpenChange,
+}: {
+  readonly label: string;
+  readonly value: string;
+  readonly tone?: UsageTone;
+  readonly bar?: ReactNode;
+  readonly open: boolean;
+  readonly onOpenChange: (open: boolean) => void;
+}) {
+  return (
+    <ThreadDetailsControl
+      size="sm"
+      variant="ghost"
+      part="row"
+      aria-expanded={open}
+      onClick={() => onOpenChange(!open)}
+    >
+      <span className={cn("min-w-0 flex-1 truncate", THREAD_DETAILS_PANEL_LABEL_CLASS)}>
+        {label}
+      </span>
+      <span
+        className={cn(
+          "text-xs tabular-nums",
+          tone === "error"
+            ? "text-error-foreground"
+            : tone === "warning"
+              ? "text-warning-foreground"
+              : "text-muted-foreground",
+        )}
+      >
+        {value}
+      </span>
+      {bar ? <span className="flex w-12 shrink-0 flex-col">{bar}</span> : null}
+      <ChevronRightIcon
+        aria-hidden
+        className={cn(
+          THREAD_DETAILS_PANEL_CHEVRON_CLASS,
+          "transition-transform",
+          open && "rotate-90",
+        )}
+      />
+    </ThreadDetailsControl>
   );
 }
 
@@ -208,32 +286,7 @@ function UsageRow({
         }
       >
         <span className="max-w-28 truncate text-muted-foreground">{label}</span>
-        {fill !== null ? (
-          <span className="relative h-[3px] rounded-full bg-muted-foreground/30 dark:bg-muted-foreground/20">
-            {fill > 0 ? (
-              <span
-                className={cn(
-                  "absolute inset-y-0 left-0 rounded-full",
-                  tone === "error"
-                    ? "bg-error"
-                    : tone === "warning"
-                      ? "bg-warning"
-                      : muted
-                        ? "bg-muted-foreground"
-                        : "bg-foreground/80",
-                )}
-                style={{ width: `max(${fill}%, 6px)` }}
-              />
-            ) : null}
-            {tick !== null ? (
-              <span
-                aria-hidden
-                className="absolute -top-[3px] h-[9px] w-px -translate-x-1/2 bg-foreground/60"
-                style={{ left: `${tick}%` }}
-              />
-            ) : null}
-          </span>
-        ) : null}
+        {fill !== null ? <UsageBar fill={fill} tone={tone} tick={tick} muted={muted} /> : null}
         <span
           className={cn(
             // Text-only rows span the bar column so they never widen the shared value column.
@@ -256,5 +309,45 @@ function UsageRow({
         <div className="flex flex-col gap-0.5">{tooltip}</div>
       </TooltipPopup>
     </Tooltip>
+  );
+}
+
+/** A hairline that fills from 0 to 100, with an optional marker. */
+function UsageBar({
+  fill,
+  tone,
+  tick = null,
+  muted = false,
+}: {
+  readonly fill: number | null;
+  readonly tone: UsageTone;
+  readonly tick?: number | null;
+  readonly muted?: boolean;
+}) {
+  return (
+    <span className="relative h-[3px] rounded-full bg-muted-foreground/30 dark:bg-muted-foreground/20">
+      {fill !== null && fill > 0 ? (
+        <span
+          className={cn(
+            "absolute inset-y-0 left-0 rounded-full",
+            tone === "error"
+              ? "bg-error"
+              : tone === "warning"
+                ? "bg-warning"
+                : muted
+                  ? "bg-muted-foreground"
+                  : "bg-foreground/80",
+          )}
+          style={{ width: `max(${fill}%, 6px)` }}
+        />
+      ) : null}
+      {tick !== null ? (
+        <span
+          aria-hidden
+          className="absolute -top-[3px] h-[9px] w-px -translate-x-1/2 bg-foreground/60"
+          style={{ left: `${tick}%` }}
+        />
+      ) : null}
+    </span>
   );
 }

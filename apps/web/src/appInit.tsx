@@ -13,7 +13,7 @@ import { applyAppearanceFontVariables, TYPOGRAPHY_ADVANCED_STORAGE_KEY } from ".
 import { startElectronBrowserHost } from "./browser/ElectronBrowserHost";
 import { startBrowserProfileReporting } from "./browser/BrowserProfileReporter";
 import { startPreviewTitleRecording } from "./browserHistoryStore";
-import { retainThreadOverlaysForThread } from "./components/chat/threadOverlayRetention";
+import { retainThreadOverlaysForThreads } from "./components/chat/threadOverlayRetention";
 import { resolveWindowTitleThreadStatus } from "./components/Sidebar.logic";
 import { startBackgroundThreadAnnouncements } from "./components/BackgroundThreadAnnouncer";
 import { startSshPasswordPromptQueue } from "./components/desktop/SshPasswordPromptDialog";
@@ -54,6 +54,7 @@ import {
 import { startProviderAuthDelivery } from "./providerAuthDelivery";
 import { getRouter, type AppRouter } from "./router";
 import { appAtomRegistry } from "./rpc/atomRegistry";
+import { useSplitViewStore } from "./splitView/splitViewStore";
 import { environmentProjects } from "./state/projects";
 import { primaryServerConfigAtom } from "./state/server";
 import { environmentShell } from "./state/shell";
@@ -63,7 +64,11 @@ import { startI18n } from "./i18n/runtime";
 import { installCommandPaletteCommands } from "./shortcuts/commandPaletteCommands";
 import { registerOpenFavoriteEditorCommand } from "./components/chat/OpenInPickerShortcut";
 import { environmentThreadShells, threadEnvironment } from "./state/threads";
-import { resolveActiveThreadRouteRef, resolveThreadRouteTarget } from "./threadRoutes";
+import {
+  resolveActiveThreadRouteRef,
+  resolveThreadRouteTarget,
+  type ThreadRouteTarget,
+} from "./threadRoutes";
 
 /** Writes appearance settings onto the document, touching only the groups that changed. */
 function startClientAppearance(): void {
@@ -225,8 +230,7 @@ function startBrowserChromeThemeSync(router: AppRouter): void {
 
 /** Chat overlays belong to the thread they were opened in, so leaving its route drops them. */
 function startThreadOverlayRetention(router: AppRouter): void {
-  router.subscribe("onResolved", () => {
-    const target = resolveThreadRouteTarget(router.state.matches.at(-1)?.params ?? {});
+  const threadKeyOf = (target: ThreadRouteTarget | null) => {
     const draftSession =
       target?.kind === "draft"
         ? useComposerDraftStore.getState().getDraftSession(target.draftId)
@@ -237,7 +241,17 @@ function startThreadOverlayRetention(router: AppRouter): void {
         : draftSession
           ? scopeThreadRef(draftSession.environmentId, draftSession.threadId)
           : null;
-    retainThreadOverlaysForThread(threadRef ? scopedThreadKey(threadRef) : null);
+    return threadRef ? scopedThreadKey(threadRef) : null;
+  };
+  router.subscribe("onResolved", () => {
+    const routeTarget = resolveThreadRouteTarget(router.state.matches.at(-1)?.params ?? {});
+    const { panes } = useSplitViewStore.getState();
+    const shown = new Set<string>();
+    for (const target of [routeTarget, ...panes.map((pane) => pane.target)]) {
+      const key = threadKeyOf(target);
+      if (key !== null) shown.add(key);
+    }
+    retainThreadOverlaysForThreads(shown);
   });
 }
 

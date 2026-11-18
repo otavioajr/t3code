@@ -137,21 +137,18 @@ export function agentControlledBrowserCloseConfirmation(
   ].join("\n");
 }
 
+/** Hidden while any panel group already shows the same browser tab or device. */
 export function shouldRenderPreviewMiniPlayer(
   source: PreviewMiniPlayerSource | null,
-  renderedRightPanelSurface: RightPanelSurface | null,
+  shownSurfaces: readonly RightPanelSurface[],
 ): boolean {
   if (source === null) return false;
-  if (source.kind === "browser") {
-    return !(
-      renderedRightPanelSurface?.kind === "preview" &&
-      renderedRightPanelSurface.resourceId === source.tabId
-    );
-  }
-  return !(
-    renderedRightPanelSurface?.kind === "device" &&
-    renderedRightPanelSurface.target?.hostId === source.hostId &&
-    renderedRightPanelSurface.target.deviceId === source.deviceId
+  return !shownSurfaces.some((surface) =>
+    source.kind === "browser"
+      ? surface.kind === "preview" && surface.resourceId === source.tabId
+      : surface.kind === "device" &&
+        surface.target?.hostId === source.hostId &&
+        surface.target.deviceId === source.deviceId,
   );
 }
 

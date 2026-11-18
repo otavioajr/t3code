@@ -55,6 +55,19 @@ const MODEL_PICKER_KEYBINDING_COMMANDS = [
   ...MODEL_PICKER_JUMP_KEYBINDING_COMMANDS,
 ] as const;
 
+const SPLIT_VIEW_KEYBINDING_COMMANDS = [
+  "splitView.splitRight",
+  "splitView.splitDown",
+  "splitView.focusNext",
+  "splitView.focusPrevious",
+  "splitView.moveLeft",
+  "splitView.moveRight",
+  "splitView.moveUp",
+  "splitView.moveDown",
+  "splitView.close",
+] as const;
+export type SplitViewKeybindingCommand = (typeof SPLIT_VIEW_KEYBINDING_COMMANDS)[number];
+
 export const STATIC_KEYBINDING_COMMANDS = [
   "workspace.focusNext",
   "workspace.focusPrevious",
@@ -117,6 +130,7 @@ export const STATIC_KEYBINDING_COMMANDS = [
   "usage.period.quarter",
   ...MODEL_PICKER_KEYBINDING_COMMANDS,
   ...THREAD_KEYBINDING_COMMANDS,
+  ...SPLIT_VIEW_KEYBINDING_COMMANDS,
 ] as const;
 
 export const SCRIPT_RUN_COMMAND_PATTERN = Schema.TemplateLiteral([
