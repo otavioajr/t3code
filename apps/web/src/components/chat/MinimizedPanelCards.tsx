@@ -60,6 +60,8 @@ function cardTitle(surface: RightPanelSurface): string {
       return "Pull requests";
     case "plan":
       return "Plan";
+    case "issue":
+      return /^\d+$/.test(surface.key) ? `#${surface.key}` : surface.key;
     case "side-chat":
       return "Side chat";
     case "diff":

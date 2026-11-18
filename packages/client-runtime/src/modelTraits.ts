@@ -7,6 +7,8 @@ import {
   isClaudeUltrathinkPrompt,
 } from "@t3tools/shared/model";
 import { REASONING_EFFORT_OPTION_IDS } from "./state/threadExecution.ts";
+import { mFallback, msg } from "gt-i18n";
+import type { MFunctionType } from "gt-i18n/types";
 
 export const WORKFLOW_SELECT_DESCRIPTOR_IDS: ReadonlySet<string> = new Set(
   CLAUDE_WORKFLOW_OPTION_IDS,
@@ -125,13 +127,16 @@ export function getTraitSelectChange(
   };
 }
 
-export function buildTraitsTriggerDisplay(input: {
-  descriptors: ReadonlyArray<ProviderOptionDescriptor>;
-  primarySelectDescriptorId: string | null;
-  ultrathinkPromptControlled: boolean;
-  modelSelection?: ModelSelection | null;
-  reportedModelSelection?: ModelSelection | null | undefined;
-}): {
+export function buildTraitsTriggerDisplay(
+  input: {
+    descriptors: ReadonlyArray<ProviderOptionDescriptor>;
+    primarySelectDescriptorId: string | null;
+    ultrathinkPromptControlled: boolean;
+    modelSelection?: ModelSelection | null;
+    reportedModelSelection?: ModelSelection | null | undefined;
+  },
+  resolve: MFunctionType = mFallback,
+): {
   label: string;
   /** "Fast" or "Ultrafast" when a speed option is on. */
   speedLabel: string | null;
@@ -146,7 +151,8 @@ export function buildTraitsTriggerDisplay(input: {
     if (WORKFLOW_SELECT_DESCRIPTOR_IDS.has(descriptor.id)) continue;
     if (descriptor.id === "fastMode" && descriptor.type === "boolean") {
       speedLabel = descriptor.currentValue === true ? "Fast" : null;
-      fastModeFallbackLabel = speedLabel ?? "Normal";
+      fastModeFallbackLabel =
+        speedLabel ?? resolve(msg("Normal", { $context: "model speed tier" }));
       continue;
     }
     if (descriptor.id === "ultracode" && descriptor.type === "boolean") {
@@ -172,7 +178,8 @@ export function buildTraitsTriggerDisplay(input: {
               ? "Fast"
               : null;
         fastModeFallbackLabel =
-          descriptor.options.find(({ id }) => id === currentValue)?.label ?? "Normal";
+          descriptor.options.find(({ id }) => id === currentValue)?.label ??
+          resolve(msg("Normal", { $context: "model speed tier" }));
         continue;
       }
     }
@@ -180,7 +187,9 @@ export function buildTraitsTriggerDisplay(input: {
       input.ultrathinkPromptControlled && descriptor.id === input.primarySelectDescriptorId
         ? "Ultrathink"
         : descriptor.type === "boolean"
-          ? `${descriptor.label} ${descriptor.currentValue === true ? "On" : "Off"}`
+          ? descriptor.currentValue === true
+            ? resolve(msg("{label} On", { label: descriptor.label }))
+            : resolve(msg("{label} Off", { label: descriptor.label }))
           : (getProviderOptionCurrentLabel(
               descriptor,
               input.modelSelection,

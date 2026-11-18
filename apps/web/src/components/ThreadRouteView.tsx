@@ -8,7 +8,7 @@ import { Navigate, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 
 import ChatView from "./ChatView";
-import { BackgroundThreadContext } from "./chat/backgroundThread";
+import { BackgroundThreadContext, HiddenThreadContext } from "./chat/backgroundThread";
 import { SidebarInset } from "./ui/sidebar";
 import { SplitChatLayout } from "./splitView/SplitChatLayout";
 import { useChatPane } from "../splitView/chatPane";
@@ -269,7 +269,9 @@ export function ThreadRouteContent({
   return (
     <>
       <BackgroundThreadContext value={background || unfocusedPane}>
-        {view ?? (detached ? fallback : null)}
+        <HiddenThreadContext value={background}>
+          {view ?? (detached ? fallback : null)}
+        </HiddenThreadContext>
       </BackgroundThreadContext>
       {background || detached ? null : redirect}
     </>

@@ -36,7 +36,7 @@ import { Switch } from "../ui/switch";
 import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { SettingsRow } from "./settingsLayout";
-import { searchableSetting } from "./settingsSearch";
+import { useSearchableSetting } from "./settingsSearch";
 
 const extensionFailureMessage = (cause: unknown): string => {
   const message = String((cause as { message?: unknown } | undefined)?.message ?? "");
@@ -53,6 +53,7 @@ interface ImportPicker {
 }
 
 export function BrowserExtensionsSetting({ disabled }: { readonly disabled: boolean }) {
+  const searchableSetting = useSearchableSetting();
   const [extensions, setExtensions] = useState<ReadonlyArray<BrowserExtension>>([]);
   const [sources, setSources] = useState<ReadonlyArray<BrowserImportSource>>([]);
   const [picker, setPicker] = useState<ImportPicker | null>(null);

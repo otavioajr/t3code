@@ -5,7 +5,7 @@ import {
 } from "@t3tools/provider-core/server/textGenerationPrompts";
 import * as FileSystem from "effect/FileSystem";
 import * as Schema from "effect/Schema";
-import { Tool, Toolkit } from "effect/ai";
+import { McpSchema, Tool, Toolkit } from "effect/ai";
 
 import * as ThreadManagementService from "../../../orchestration-v2/ThreadManagementService.ts";
 import * as ServerSettings from "../../../serverSettings.ts";
@@ -43,6 +43,7 @@ const ConsultAdvisorTool = Tool.make(CONSULT_ADVISOR_TOOL_NAME, {
   .annotate(Tool.Readonly, true)
   .annotate(Tool.Destructive, false)
   .annotate(Tool.Idempotent, false)
-  .annotate(Tool.OpenWorld, true);
+  .annotate(Tool.OpenWorld, true)
+  .annotate(McpSchema.EnabledWhen, McpInvocationContext.hiddenFromOutsideClients);
 
 export const AdvisorToolkit = Toolkit.make(ConsultAdvisorTool);

@@ -1,4 +1,5 @@
 import { proposedPlanTitle } from "@t3tools/shared/proposedPlanText";
+import { msg, T, useGT, Var } from "gt-react";
 import { memo, useState, useId } from "react";
 import {
   isAtomCommandInterrupted,
@@ -41,6 +42,7 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
   /** Opens the plan in the right panel. */
   onOpen: (() => void) | undefined;
 }) {
+  const gt = useGT();
   const canWriteFiles = useEnvironmentScope(environmentId, AuthFilesystemWriteScope);
   const [isSaveDialogOpen, setIsSaveDialogOpen] = useState(false);
   const [lastSavePath, setLastSavePath] = useState("");
@@ -49,18 +51,23 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
     reportFailure: false,
   });
   const { copyToClipboard, isCopied } = useCopyToClipboard({
-    target: "plan",
+    target: {
+      target: "plan",
+      unavailableMessage: msg("Clipboard API is unavailable while copying plan."),
+      failureMessage: msg("Failed to copy plan to the clipboard."),
+    },
     onError: (error) => {
       toastManager.add(
         stackedThreadToast({
           type: "error",
-          title: "Could not copy plan",
-          description: error instanceof Error ? error.message : "An error occurred while copying.",
+          title: gt("Could not copy plan"),
+          description:
+            error instanceof Error ? error.message : gt("An error occurred while copying."),
         }),
       );
     },
   });
-  const title = proposedPlanTitle(planMarkdown) ?? "Proposed plan";
+  const title = proposedPlanTitle(planMarkdown) ?? gt("Proposed plan");
   const downloadFilename = buildProposedPlanMarkdownFilename(planMarkdown);
   const saveContents = normalizePlanMarkdownForExport(planMarkdown);
 
@@ -78,8 +85,8 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
       toastManager.add(
         stackedThreadToast({
           type: "error",
-          title: "Workspace path is unavailable",
-          description: "This thread does not have a workspace path to save into.",
+          title: gt("Workspace path is unavailable"),
+          description: gt("This thread does not have a workspace path to save into."),
         }),
       );
       return;
@@ -95,7 +102,7 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
     if (!relativePath) {
       toastManager.add({
         type: "warning",
-        title: "Enter a workspace path",
+        title: gt("Enter a workspace path"),
       });
       return;
     }
@@ -116,7 +123,7 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
         setIsSaveDialogOpen(false);
         toastManager.add({
           type: "success",
-          title: "Plan saved to workspace",
+          title: gt("Plan saved to workspace"),
           description: result.value.relativePath,
         });
         return;
@@ -126,8 +133,9 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
         toastManager.add(
           stackedThreadToast({
             type: "error",
-            title: "Could not save plan",
-            description: error instanceof Error ? error.message : "An error occurred while saving.",
+            title: gt("Could not save plan"),
+            description:
+              error instanceof Error ? error.message : gt("An error occurred while saving."),
           }),
         );
       }
@@ -139,11 +147,13 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
       <button
         type="button"
         className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md text-start outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-        aria-label={`Open plan: ${title}`}
+        aria-label={gt("Open plan: {title}", { title })}
         disabled={onOpen === undefined}
         onClick={onOpen}
       >
-        <span className="shrink-0 text-xs text-muted-foreground">Created Plan</span>
+        <span className="shrink-0 text-xs text-muted-foreground">
+          <T>Created Plan</T>
+        </span>
         {/* Same heading level as the message author headings in the timeline. */}
         <h3 data-thread-find-text="true" className="truncate text-sm font-medium text-foreground">
           {title}
@@ -152,18 +162,22 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
       </button>
       <Menu>
         <MenuTrigger
-          render={<Button aria-label="Plan actions" size="icon-xs" variant="ghost-muted" />}
+          render={<Button aria-label={gt("Plan actions")} size="icon-xs" variant="ghost-muted" />}
         >
           <EllipsisIcon aria-hidden="true" className="size-4" />
         </MenuTrigger>
         <MenuPopup align="end">
-          <MenuItem onClick={handleCopyPlan}>{isCopied ? "Copied!" : "Copy to clipboard"}</MenuItem>
-          <MenuItem onClick={handleDownload}>Download as markdown</MenuItem>
+          <MenuItem onClick={handleCopyPlan}>
+            {isCopied ? gt("Copied!") : gt("Copy to clipboard")}
+          </MenuItem>
+          <MenuItem onClick={handleDownload}>
+            <T>Download as markdown</T>
+          </MenuItem>
           <MenuItem
             onClick={openSaveDialog}
             disabled={!canWriteFiles || !workspaceRoot || isSavingToWorkspace}
           >
-            Save to workspace
+            <T>Save to workspace</T>
           </MenuItem>
         </MenuPopup>
       </Menu>
@@ -209,19 +223,36 @@ function SavePlanToWorkspaceForm({
   onCancel: () => void;
   onSave: (path: string) => void;
 }) {
+  const gt = useGT();
   const [savePath, setSavePath] = useState(initialPath);
   const savePathInputId = useId();
   return (
     <>
       <DialogHeader>
-        <DialogTitle>Save plan to workspace</DialogTitle>
+        <DialogTitle>
+          <T>Save plan to workspace</T>
+        </DialogTitle>
         <DialogDescription>
-          Enter a path relative to <code>{workspaceRoot ?? "the workspace"}</code>.
+          {workspaceRoot !== undefined ? (
+            <T>
+              Enter a path relative to{" "}
+              <code>
+                <Var>{workspaceRoot}</Var>
+              </code>
+              .
+            </T>
+          ) : (
+            <T>
+              Enter a path relative to <code>the workspace</code>.
+            </T>
+          )}
         </DialogDescription>
       </DialogHeader>
       <DialogPanel>
         <label htmlFor={savePathInputId} className="grid gap-1.5">
-          <span className="text-xs font-medium text-foreground">Workspace path</span>
+          <span className="text-xs font-medium text-foreground">
+            <T>Workspace path</T>
+          </span>
           <Input
             id={savePathInputId}
             value={savePath}
@@ -234,10 +265,10 @@ function SavePlanToWorkspaceForm({
       </DialogPanel>
       <DialogFooter>
         <Button variant="outline" size="sm" onClick={onCancel} disabled={saving}>
-          Cancel
+          <T>Cancel</T>
         </Button>
         <Button size="sm" onClick={() => onSave(savePath)} disabled={!canWriteFiles || saving}>
-          {saving ? "Saving..." : "Save"}
+          {saving ? gt("Saving...") : gt("Save")}
         </Button>
       </DialogFooter>
     </>

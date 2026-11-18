@@ -1,4 +1,7 @@
 import { stripDisplayedPlanMarkdown, proposedPlanTitle } from "@t3tools/shared/proposedPlanText";
+import { msg } from "gt-react";
+
+import { m, type MessageResolver } from "./i18n/messages";
 
 /**
  * The first paragraph after the plan's title as one line of plain text, or null when the plan
@@ -163,12 +166,15 @@ export function resolvePlanFollowUpSubmission(input: { draftText: string; planMa
   };
 }
 
-export function buildPlanImplementationThreadTitle(planMarkdown: string): string {
+export function buildPlanImplementationThreadTitle(
+  planMarkdown: string,
+  resolve: MessageResolver = m,
+): string {
   const title = proposedPlanTitle(planMarkdown);
   if (!title) {
-    return "Implement plan";
+    return resolve(msg("Implement plan"));
   }
-  return `Implement ${title}`;
+  return resolve(msg("Implement {title}", { title }));
 }
 
 export function buildProposedPlanMarkdownFilename(planMarkdown: string): string {

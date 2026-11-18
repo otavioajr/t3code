@@ -12,12 +12,17 @@ import {
   wasBootstrapThreadNotCreated,
 } from "@t3tools/client-runtime/errors";
 import { Atom } from "effect/reactivity";
+import { msg } from "gt-react";
 import {
   squashAtomCommandFailure,
   type AtomCommandResult,
 } from "@t3tools/client-runtime/state/runtime";
+import { m } from "../../i18n/messages";
 import { readLocalApi } from "../../localApi";
-import { awaitAttachmentUploads, getUploadedAttachments } from "../../lib/attachmentUploadQueue";
+import {
+  getUploadedAttachments,
+  refreshExpiredAttachmentUploads,
+} from "../../lib/attachmentUploadQueue";
 import { findRevertCheckpoint } from "../../session-logic";
 import { type ChatMessage } from "../../types";
 import { randomUUID } from "~/lib/utils";
@@ -26,6 +31,7 @@ import { newThreadId } from "~/lib/utils";
 import {
   type ComposerFileAttachment,
   type ComposerImageAttachment,
+  type ComposerThreadTarget,
   useComposerDraftStore,
   DraftId,
 } from "../../composerDraftStore";
@@ -44,7 +50,7 @@ import {
   waitForRevertedMessage,
 } from "../ChatView.logic";
 import { readPreparedConnection } from "../../state/session";
-import { recallableComposerPrompt } from "./composerPromptHistory";
+import { recallComposerMessage } from "./composerPromptHistory";
 import { buildPlanFirstPrompt } from "../../proposedPlan";
 
 // Kept per route so a send in flight, and the multiple-model selections, survive
@@ -88,7 +94,11 @@ export async function startFanoutThread(input: {
   try {
     if (uncertainThreadId) {
       throw new Error(
-        "The previous request may have started. Open its thread to check before sending again.",
+        m(
+          msg(
+            "The previous request may have started. Open its thread to check before sending again.",
+          ),
+        ),
       );
     }
     requestMayHaveStarted = true;
@@ -109,18 +119,22 @@ export async function startFanoutThread(input: {
     const failureToastId = toastManager.add(
       stackedThreadToast({
         type: "error",
-        title: `Could not start ${input.model}`,
-        description: error instanceof Error ? error.message : "Failed to send message.",
+        title: m(msg("Could not start {model}", { model: input.model })),
+        description: error instanceof Error ? error.message : m(msg("Failed to send message.")),
         ...(retainedThreadId
           ? {
               timeout: 0,
               data: {
                 secondaryActionProps: {
-                  children: "Allow retry",
+                  children: m(msg("Allow retry")),
                   onClick: () => {
                     void readLocalApi()
                       ?.dialogs.confirm(
-                        "The previous request may already be running. Check its thread first. Allow another send that could create a duplicate thread?",
+                        m(
+                          msg(
+                            "The previous request may already be running. Check its thread first. Allow another send that could create a duplicate thread?",
+                          ),
+                        ),
                       )
                       .then(
                         (confirmed) => {
@@ -138,7 +152,7 @@ export async function startFanoutThread(input: {
                 },
               },
               actionProps: {
-                children: "Open thread",
+                children: m(msg("Open thread")),
                 onClick: () => input.openThread(retainedThreadId),
               },
             }
@@ -150,8 +164,8 @@ export async function startFanoutThread(input: {
 }
 
 /**
- * Reverts the thread to before `message` and puts that message's text and
- * attachments back in the composer draft. Returns the restored prompt, or the
+ * Reverts the thread to before `message` and puts that message's text, mentions
+ * and attachments back in the composer draft. Returns the restored prompt, or the
  * error to show; on error the draft is untouched.
  */
 export async function rewindToMessage(input: {
@@ -185,10 +199,10 @@ export async function rewindToMessage(input: {
   const { message, environmentId, draftTarget } = input;
   try {
     if (input.composerHasPendingAttachments) {
-      throw new Error("Wait for attachments to finish preparing before rewinding.");
+      throw new Error(m(msg("Wait for attachments to finish preparing before rewinding.")));
     }
     const connection = readPreparedConnection(environmentId);
-    if (!connection) throw new Error("The environment is not connected.");
+    if (!connection) throw new Error(m(msg("The environment is not connected.")));
     const files = await prepareRevertedMessageAttachments({
       message,
       environmentId,
@@ -201,7 +215,9 @@ export async function rewindToMessage(input: {
       (draft?.images.length ?? 0) + (draft?.files.length ?? 0) + files.length >
       PROVIDER_SEND_TURN_MAX_ATTACHMENTS
     ) {
-      throw new Error("Make room for this message's attachments in the composer before rewinding.");
+      throw new Error(
+        m(msg("Make room for this message's attachments in the composer before rewinding.")),
+      );
     }
     const commandId = CommandId.make(randomUUID());
     await waitForRevertedMessage(input.routeThreadRef, input.turnCount, commandId, async () => {
@@ -220,7 +236,7 @@ export async function rewindToMessage(input: {
       if (result._tag === "Failure") throw squashAtomCommandFailure(result);
     });
     const currentPrompt = store.getComposerDraft(draftTarget)?.prompt ?? "";
-    const restoredPrompt = recallableComposerPrompt(message.text);
+    const { prompt: restoredPrompt, mentions } = recallComposerMessage(message);
     const nextPrompt =
       restoredPrompt.length === 0
         ? currentPrompt
@@ -228,6 +244,11 @@ export async function rewindToMessage(input: {
           ? `${currentPrompt}\n\n${restoredPrompt}`
           : restoredPrompt;
     store.setPrompt(draftTarget, nextPrompt);
+    // The restored prompt already carries the chips; these add only their records.
+    store.addThreadContexts(draftTarget, mentions.threadContexts, { appendReference: false });
+    store.addEnvironmentContexts(draftTarget, mentions.environmentContexts, {
+      appendReference: false,
+    });
     const images: ComposerImageAttachment[] = [];
     const restoredFiles: ComposerFileAttachment[] = [];
     files.forEach((file, index) => {
@@ -248,7 +269,9 @@ export async function rewindToMessage(input: {
     store.addFiles(draftTarget, restoredFiles, { allowDuplicates: true });
     return { error: null, prompt: nextPrompt };
   } catch (error) {
-    return { error: error instanceof Error ? error.message : "Failed to revert thread state." };
+    return {
+      error: error instanceof Error ? error.message : m(msg("Failed to revert thread state.")),
+    };
   }
 }
 
@@ -298,7 +321,7 @@ export function resolveMultipleModelTargets(input: {
       (entry) => entry.instanceId === selection.instanceId,
     );
     if (!provider?.enabled || !provider.isAvailable || provider.status !== "ready") {
-      return { error: `Provider for ${selection.model} is unavailable.` };
+      return { error: m(msg("Provider for {model} is unavailable.", { model: selection.model })) };
     }
     const providerBlockReason = getAntigravitySendBlockReason(provider.snapshot, selection.model);
     if (providerBlockReason) return { error: providerBlockReason };
@@ -342,20 +365,27 @@ export function prepareTurnAttachments(input: {
   readonly environmentId: EnvironmentId;
   readonly attachments: ReadonlyArray<ComposerImageAttachment | ComposerFileAttachment>;
   readonly usesAttachmentUploads: boolean;
+  readonly draftTarget: ComposerThreadTarget;
 }) {
-  const { environmentId, usesAttachmentUploads } = input;
+  const { environmentId, usesAttachmentUploads, draftTarget } = input;
   return Promise.all(
     input.attachments.map(async (attachment) => {
       if (usesAttachmentUploads) {
-        await awaitAttachmentUploads([attachment.id]);
+        await refreshExpiredAttachmentUploads({
+          environmentId,
+          images: [attachment],
+          draftTarget,
+        });
         const uploaded = getUploadedAttachments({ environmentId, images: [attachment] })?.[0];
         if (!uploaded) {
-          throw new Error(`Attachment '${attachment.name}' failed to upload.`);
+          throw new Error(
+            m(msg("Attachment ''{name}'' failed to upload.", { name: attachment.name })),
+          );
         }
         return uploaded;
       }
       if (attachment.type !== "image") {
-        throw new Error("This server does not support file attachments.");
+        throw new Error(m(msg("This server does not support file attachments.")));
       }
       return {
         type: "image" as const,
