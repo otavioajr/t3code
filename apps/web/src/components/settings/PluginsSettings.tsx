@@ -1,3 +1,4 @@
+import { T, useGT, useMessages } from "gt-react";
 import { useAtomValue } from "@effect/atom-react";
 import { useNavigate } from "@tanstack/react-router";
 import { InfoIcon, LockIcon, PlugIcon, PlusIcon, TriangleAlertIcon } from "lucide-react";
@@ -73,6 +74,7 @@ type PluginsSelection = ProviderInstanceId | typeof ALL_PROVIDERS;
  * the user added are browsable; there is no catalog.
  */
 export function PluginsSettings({ environmentId }: { readonly environmentId: EnvironmentId }) {
+  const gt = useGT();
   const serverProviders = useAtomValue(serverEnvironment.providersValueAtom(environmentId));
   const pluginInstances = (serverProviders ?? EMPTY_SERVER_PROVIDERS).filter((provider) =>
     PLUGIN_DRIVERS.has(provider.driver),
@@ -91,7 +93,7 @@ export function PluginsSettings({ environmentId }: { readonly environmentId: Env
     return (
       <SettingsPageContainer>
         <div className="flex items-center gap-2 px-3 text-sm text-muted-foreground sm:px-4">
-          <Spinner size="sm" /> Loading providers
+          <Spinner size="sm" /> <T>Loading providers</T>
         </div>
       </SettingsPageContainer>
     );
@@ -105,10 +107,14 @@ export function PluginsSettings({ environmentId }: { readonly environmentId: Env
             <EmptyMedia variant="icon">
               <PlugIcon />
             </EmptyMedia>
-            <EmptyTitle>No Claude or Codex instance</EmptyTitle>
+            <EmptyTitle>
+              <T>No Claude or Codex instance</T>
+            </EmptyTitle>
             <EmptyDescription>
-              Plugins are managed by Claude Code and Codex. Add one of them in Providers to install
-              plugins on this environment.
+              <T>
+                Plugins are managed by Claude Code and Codex. Add one of them in Providers to
+                install plugins on this environment.
+              </T>
             </EmptyDescription>
           </EmptyHeader>
         </Empty>
@@ -156,7 +162,7 @@ export function PluginsSettings({ environmentId }: { readonly environmentId: Env
         key={instance.instanceId}
         environmentId={environmentId}
         instance={instance}
-        title="Marketplaces"
+        title={gt("Marketplaces")}
         headerControl={selector}
         showAddRow
         reloadSignal={reloadSignal}
@@ -181,6 +187,8 @@ function AddToAllProvidersSection({
   readonly selector: ReactNode;
   readonly onAdded: () => void;
 }) {
+  const gt = useGT();
+  const messages = useMessages();
   const canManage = useAtomValue(
     serverEnvironment.addProviderPluginMarketplace.permissionAtom(environmentId),
   );
@@ -193,7 +201,7 @@ function AddToAllProvidersSection({
   >([]);
   const [lastSource, setLastSource] = useState<string | null>(null);
   const ready = instances.filter(
-    (candidate) => describePluginsReadiness(candidate)?.blocksChanges !== true,
+    (candidate) => describePluginsReadiness(candidate, messages)?.blocksChanges !== true,
   );
 
   const addTo = async (targets: ReadonlyArray<ServerProvider>, source: string) => {
@@ -226,11 +234,18 @@ function AddToAllProvidersSection({
 
   const skipped = instances.length - ready.length;
   return (
-    <SettingsSection title="All providers" headerAction={selector}>
+    <SettingsSection title={gt("All providers")} headerAction={selector}>
       <AddMarketplaceRow
-        description={`Adds the repository to ${listFormat.format(ready.map(instanceLabel))} at once.${
-          skipped > 0 ? " Providers that are off or not installed are skipped." : ""
-        }`}
+        description={
+          skipped > 0
+            ? gt(
+                "Adds the repository to {providers} at once. Providers that are off or not installed are skipped.",
+                { providers: listFormat.format(ready.map(instanceLabel)) },
+              )
+            : gt("Adds the repository to {providers} at once.", {
+                providers: listFormat.format(ready.map(instanceLabel)),
+              })
+        }
         canChange={canManage && ready.length > 0}
         pending={pending}
         onSubmit={(source) => addTo(ready, source)}
@@ -272,12 +287,14 @@ function PluginsInstancePanel({
   /** Each change reloads the list, after a marketplace was added from outside the panel. */
   readonly reloadSignal: number;
 }) {
+  const gt = useGT();
+  const messages = useMessages();
   const instanceId = instance.instanceId;
   const navigate = useNavigate();
   const canManage = useAtomValue(
     serverEnvironment.addProviderPluginMarketplace.permissionAtom(environmentId),
   );
-  const readiness = describePluginsReadiness(instance);
+  const readiness = describePluginsReadiness(instance, messages);
   const canChange = canManage && readiness?.blocksChanges !== true;
   const listPlugins = useAtomCommand(serverEnvironment.listProviderPlugins, {
     reportFailure: false,
@@ -441,7 +458,7 @@ function PluginsInstancePanel({
             onClick={() => void refreshPlugins()}
           >
             <RefreshIcon refreshing={loading} size="xs" />
-            {loading ? "Refreshing" : "Refresh"}
+            {loading ? gt("Refreshing") : gt("Refresh")}
           </Button>
         </div>
       }
@@ -463,7 +480,7 @@ function PluginsInstancePanel({
                   })
                 }
               >
-                Open Providers
+                <T>Open Providers</T>
               </Button>
             </AlertAction>
           </Alert>
@@ -475,7 +492,7 @@ function PluginsInstancePanel({
           <Alert variant="info">
             <InfoIcon />
             <AlertDescription>
-              This connection can view plugins but cannot change them.
+              <T>This connection can view plugins but cannot change them.</T>
             </AlertDescription>
           </Alert>
         </div>
@@ -493,7 +510,9 @@ function PluginsInstancePanel({
 
       {showAddRow ? (
         <AddMarketplaceRow
-          description="A GitHub repository, as owner/repo or its link. Its plugins are listed once added."
+          description={gt(
+            "A GitHub repository, as owner/repo or its link. Its plugins are listed once added.",
+          )}
           canChange={canChange}
           pending={addPending}
           onSubmit={submitMarketplace}
@@ -512,12 +531,12 @@ function PluginsInstancePanel({
 
       {snapshot === null && loadFailure === null ? (
         <div className="flex items-center gap-2 px-3 py-4 text-sm text-muted-foreground sm:px-4">
-          <Spinner size="sm" /> Loading plugins
+          <Spinner size="sm" /> <T>Loading plugins</T>
         </div>
       ) : null}
       {snapshot !== null && groups.length === 0 ? (
         <p className="px-3 py-4 text-sm text-muted-foreground sm:px-4">
-          No marketplaces yet. Add a repository above to see its plugins.
+          <T>No marketplaces yet. Add a repository above to see its plugins.</T>
         </p>
       ) : null}
       {groups.map((group) => (
@@ -553,6 +572,7 @@ function AddMarketplaceRow({
   /** Failures of the last add, shown under the row. */
   readonly children?: ReactNode;
 }) {
+  const gt = useGT();
   const [draft, setDraft] = useState("");
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -564,7 +584,7 @@ function AddMarketplaceRow({
   };
   return (
     <SettingsRow
-      title="Add marketplace"
+      title={gt("Add marketplace")}
       description={description}
       control={
         <form
@@ -576,11 +596,11 @@ function AddMarketplaceRow({
             <Input
               font="mono"
               size="sm"
-              aria-label="Marketplace source"
+              aria-label={gt("Marketplace source")}
               autoCapitalize="none"
               autoComplete="off"
               spellCheck={false}
-              placeholder="owner/repo or https://github.com/owner/repo"
+              placeholder={gt("owner/repo or https://github.com/owner/repo")}
               value={draft}
               disabled={!canChange}
               readOnly={pending}
@@ -594,7 +614,7 @@ function AddMarketplaceRow({
             disabled={!canChange || pending || draft.trim().length === 0}
           >
             {pending ? <Spinner size="xs" /> : <PlusIcon />}
-            {pending ? "Adding" : "Add"}
+            {pending ? gt("Adding") : gt("Add", { $context: "button, adds a marketplace" })}
           </Button>
         </form>
       }
@@ -619,6 +639,8 @@ function MarketplaceBlock({
   readonly onAction: (action: PluginAction) => void;
   readonly onConfirmedAction: (action: PluginAction, message: string) => void;
 }) {
+  const gt = useGT();
+  const messages = useMessages();
   const target = marketplaceTarget(group.name);
   const busy = pendingTargets.has(target);
   const error = errors.get(target);
@@ -630,10 +652,10 @@ function MarketplaceBlock({
           <p className="truncate text-sm font-medium text-foreground">{group.name}</p>
           <p className="truncate text-xs text-muted-foreground">
             {group.builtIn
-              ? "Built in"
-              : (group.source ?? (group.added ? "Source not reported" : "No longer added"))}
+              ? gt("Built in")
+              : (group.source ?? (group.added ? gt("Source not reported") : gt("No longer added")))}
             {" · "}
-            {pluginCountLabel(group.plugins.length)}
+            {pluginCountLabel(group.plugins.length, messages)}
           </p>
         </div>
         {group.added && !group.builtIn ? (
@@ -642,25 +664,28 @@ function MarketplaceBlock({
             <Button
               size="xs"
               variant="ghost-muted"
-              aria-label={`Update marketplace ${group.name}`}
+              aria-label={gt("Update marketplace {name}", { name: group.name })}
               disabled={controlsDisabled}
               onClick={() => onAction({ kind: "update-marketplace", marketplace: group.name })}
             >
-              Update
+              <T>Update</T>
             </Button>
             <Button
               size="xs"
               variant="ghost-destructive"
-              aria-label={`Remove marketplace ${group.name}`}
+              aria-label={gt("Remove marketplace {name}", { name: group.name })}
               disabled={controlsDisabled}
               onClick={() =>
                 onConfirmedAction(
                   { kind: "remove-marketplace", marketplace: group.name },
-                  `Remove marketplace "${group.name}"? Plugins installed from it may be uninstalled too.`,
+                  gt(
+                    'Remove marketplace "{name}"? Plugins installed from it may be uninstalled too.',
+                    { name: group.name },
+                  ),
                 )
               }
             >
-              Remove
+              <T>Remove</T>
             </Button>
           </div>
         ) : null}
@@ -678,7 +703,7 @@ function MarketplaceBlock({
 
       {group.plugins.length === 0 ? (
         <p className="px-3 text-xs text-muted-foreground sm:px-4">
-          No plugins in this marketplace.
+          <T>No plugins in this marketplace.</T>
         </p>
       ) : (
         <div className="divide-y divide-border/60 border-y border-border/60">
@@ -717,6 +742,7 @@ function PluginRow({
   readonly onAction: (action: PluginAction) => void;
   readonly onConfirmedAction: (action: PluginAction, message: string) => void;
 }) {
+  const gt = useGT();
   const controlsDisabled = !canChange || busy;
   return (
     <div className="grid gap-2 px-3 py-2.5 sm:px-4">
@@ -729,7 +755,7 @@ function PluginRow({
             ) : null}
             {plugin.installed ? null : (
               <Badge size="sm" variant="outline">
-                Not installed
+                <T>Not installed</T>
               </Badge>
             )}
           </div>
@@ -742,7 +768,7 @@ function PluginRow({
           {plugin.installed ? (
             <>
               <Switch
-                aria-label={`Enable ${plugin.name}`}
+                aria-label={gt("Enable {name}", { name: plugin.name })}
                 checked={plugin.enabled}
                 disabled={controlsDisabled}
                 onCheckedChange={(enabled) =>
@@ -752,27 +778,27 @@ function PluginRow({
               <Button
                 size="xs"
                 variant="ghost-destructive"
-                aria-label={`Uninstall ${plugin.name}`}
+                aria-label={gt("Uninstall {name}", { name: plugin.name })}
                 disabled={controlsDisabled}
                 onClick={() =>
                   onConfirmedAction(
                     { kind: "uninstall-plugin", pluginId: plugin.id },
-                    `Uninstall "${plugin.name}"?`,
+                    gt('Uninstall "{name}"?', { name: plugin.name }),
                   )
                 }
               >
-                Uninstall
+                <T>Uninstall</T>
               </Button>
             </>
           ) : (
             <Button
               size="xs"
               variant="outline"
-              aria-label={`Install ${plugin.name}`}
+              aria-label={gt("Install {name}", { name: plugin.name })}
               disabled={controlsDisabled}
               onClick={() => onAction({ kind: "install-plugin", pluginId: plugin.id })}
             >
-              Install
+              <T>Install</T>
             </Button>
           )}
         </div>
@@ -798,6 +824,7 @@ function PluginsFailureAlert({
   readonly retrying: boolean;
   readonly onRetry: () => void;
 }) {
+  const gt = useGT();
   const Icon = view.needsAccess ? LockIcon : view.tone === "info" ? InfoIcon : TriangleAlertIcon;
   return (
     <Alert variant={view.tone}>
@@ -807,7 +834,7 @@ function PluginsFailureAlert({
       {view.retryable ? (
         <AlertAction>
           <Button size="xs" variant="outline" disabled={retrying} onClick={onRetry}>
-            {retrying ? "Retrying" : "Retry"}
+            {retrying ? gt("Retrying") : gt("Retry")}
           </Button>
         </AlertAction>
       ) : null}
@@ -824,6 +851,7 @@ function InstanceSelect({
   readonly instances: ReadonlyArray<ServerProvider>;
   readonly onSelect: (selection: PluginsSelection) => void;
 }) {
+  const gt = useGT();
   const selected = instances.find((candidate) => candidate.instanceId === selection);
   return (
     <Select<string>
@@ -834,11 +862,11 @@ function InstanceSelect({
         if (next) onSelect(next.instanceId);
       }}
     >
-      <SelectTrigger aria-label="Provider" size="sm">
-        <SelectValue>{selected ? instanceLabel(selected) : "All providers"}</SelectValue>
+      <SelectTrigger aria-label={gt("Provider", { $context: "AI provider selector" })} size="sm">
+        <SelectValue>{selected ? instanceLabel(selected) : gt("All providers")}</SelectValue>
       </SelectTrigger>
       <SelectPopup>
-        <SelectItem value={ALL_PROVIDERS}>All providers</SelectItem>
+        <SelectItem value={ALL_PROVIDERS}>{gt("All providers")}</SelectItem>
         {instances.map((candidate) => (
           <SelectItem key={candidate.instanceId} value={candidate.instanceId}>
             {instanceLabel(candidate)}

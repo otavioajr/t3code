@@ -393,7 +393,7 @@ describe("ChatMarkdown external link labels", () => {
 });
 
 describe("ChatMarkdown streaming", () => {
-  it("runs only a complete single-line shell block after a click", async () => {
+  it("runs only a complete shell block after a click", async () => {
     setup();
     const onRunShellCommand = vi.fn();
     const message = (text: string, isStreaming = false) => (
@@ -419,16 +419,17 @@ describe("ChatMarkdown streaming", () => {
       "````bash\necho four\n````",
       "- Command\n\n  ```bash\n  echo list\n  ```",
       "```bash\r\necho crlf\r\n```\r",
+      // This fork runs multi-line blocks line by line.
+      "```bash\necho one\necho two\n```",
+      "```bash\necho hello\n\n```",
     ]) {
       await rerender(message(text));
       expect(runButtons()).toHaveLength(1);
     }
 
     for (const text of [
-      "```bash\necho one\necho two\n```",
       "```typescript\necho hello\n```",
       "```bash\n\n```",
-      "```bash\necho hello\n\n```",
       "```bash\necho hello\\\n```",
       "```bash\necho safe \u202e#\n```",
       "```bash\necho incomplete",

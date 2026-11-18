@@ -148,7 +148,7 @@ export function buildThreadActionMenuItems(
 ): ReadonlyArray<ContextMenuItem<ThreadActionMenuId>> {
   const items: ReadonlyArray<ContextMenuItem<ThreadActionMenuId>> = [
     ...(state.canOpenToTheRight
-      ? [{ id: "open-right" as const, label: "Open to the right", icon: "columns-2" }]
+      ? [{ id: "open-right" as const, label: resolve(msg("Open to the right")), icon: "columns-2" }]
       : []),
     ...(state.canFind
       ? [{ id: "find" as const, label: resolve(msg("Find in thread")), icon: "text-search" }]

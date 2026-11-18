@@ -5,6 +5,7 @@ import type {
   ThreadId,
 } from "@t3tools/contracts";
 import { createModelSelection } from "@t3tools/shared/model";
+import { useGT } from "gt-react";
 import { LightbulbIcon } from "lucide-react";
 import { memo } from "react";
 
@@ -33,12 +34,13 @@ export const ComposerAdvisorControl = memo(function ComposerAdvisorControl(props
   modelOptionsByInstance: ReadonlyMap<ProviderInstanceId, ReadonlyArray<ModelEsque>>;
   getModelDisabledReason?: (instanceId: ProviderInstanceId, model: string) => string | null;
 }) {
+  const gt = useGT();
   const setAdvisorSelection = useOrchestrationCommand(threadEnvironment.setAdvisorSelection, {
     reportFailure: false,
   });
   const label = props.requested
-    ? "Advisor is on for this message. Click to turn it off"
-    : "Ask the advisor before the agent answers this message";
+    ? gt("Advisor is on for this message. Click to turn it off")
+    : gt("Ask the advisor before the agent answers this message");
   const advisor = props.thread?.advisorModelSelection ?? props.settingsAdvisor;
   const pickAdvisor = async (instanceId: ProviderInstanceId, model: string) => {
     if (!props.thread) return;
@@ -54,7 +56,7 @@ export const ComposerAdvisorControl = memo(function ComposerAdvisorControl(props
       },
     });
     if (result._tag === "Failure") {
-      toastManager.add({ type: "error", title: "Advisor model not saved" });
+      toastManager.add({ type: "error", title: gt("Advisor model not saved") });
     }
   };
   return (
@@ -71,7 +73,7 @@ export const ComposerAdvisorControl = memo(function ComposerAdvisorControl(props
             modelOptionsByInstance={props.modelOptionsByInstance}
             size="xs"
             compact
-            triggerAriaLabel="Advisor model for this thread"
+            triggerAriaLabel={gt("Advisor model for this thread")}
             {...(props.getModelDisabledReason
               ? { getModelDisabledReason: props.getModelDisabledReason }
               : {})}

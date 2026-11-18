@@ -1,4 +1,5 @@
 import { useRouter } from "@tanstack/react-router";
+import { T, useGT } from "gt-react";
 import { XIcon } from "lucide-react";
 import { Fragment, useEffectEvent, useLayoutEffect } from "react";
 import { useShallow } from "zustand/react/shallow";
@@ -39,6 +40,7 @@ export function SplitChatLayout({
   routeTarget: ThreadRouteTarget;
   background: boolean;
 }) {
+  const gt = useGT();
   const { panes, direction, sizes, focusedPaneId } = useSplitViewStore(
     useShallow(({ panes, direction, sizes, focusedPaneId }) => ({
       panes,
@@ -77,7 +79,7 @@ export function SplitChatLayout({
                 <RightPanelLayoutDivider
                   orientation={horizontal ? "vertical" : "horizontal"}
                   weights={[sizes[index - 1] ?? 1, sizes[index] ?? 1]}
-                  label="Resize split"
+                  label={gt("Resize split")}
                   onCommit={(weights) => setPaneWeights(index - 1, weights)}
                 />
               ) : null}
@@ -157,17 +159,22 @@ function SplitPaneView(props: {
 }
 
 function EmptySplitPane({ onClose }: { onClose: () => void }) {
+  const gt = useGT();
   return (
     <div className="relative flex min-h-0 flex-1 items-center justify-center">
       <div className="absolute top-2 right-2">
-        <Button variant="ghost" size="icon-sm" aria-label="Close split" onClick={onClose}>
+        <Button variant="ghost" size="icon-sm" aria-label={gt("Close split")} onClick={onClose}>
           <XIcon />
         </Button>
       </div>
       <Empty>
         <EmptyHeader>
-          <EmptyTitle>No thread in this split</EmptyTitle>
-          <EmptyDescription>Pick a thread in the sidebar or start a new one.</EmptyDescription>
+          <EmptyTitle>
+            <T>No thread in this split</T>
+          </EmptyTitle>
+          <EmptyDescription>
+            <T>Pick a thread in the sidebar or start a new one.</T>
+          </EmptyDescription>
         </EmptyHeader>
       </Empty>
     </div>

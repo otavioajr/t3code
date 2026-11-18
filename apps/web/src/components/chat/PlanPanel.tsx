@@ -9,6 +9,7 @@ import type {
 } from "@t3tools/contracts";
 import { normalizeModelSlug } from "@t3tools/shared/model";
 import { proposedPlanTitle, stripDisplayedPlanMarkdown } from "@t3tools/shared/proposedPlanText";
+import { msg, T, useGT, useMessages } from "gt-react";
 import { ChevronDownIcon, ChevronRightIcon } from "lucide-react";
 import { memo, useState } from "react";
 
@@ -42,9 +43,9 @@ const PLAN_BUILD_TARGETS = ["thread", "subagent", "new-thread"] as const;
 type PlanBuildTarget = (typeof PLAN_BUILD_TARGETS)[number];
 const PlanBuildTargetSchema = Schema.Literals(PLAN_BUILD_TARGETS);
 const PLAN_BUILD_TARGET_LABELS: Record<PlanBuildTarget, string> = {
-  thread: "Build",
-  subagent: "Build with subagent",
-  "new-thread": "Build in new thread",
+  thread: msg("Build"),
+  subagent: msg("Build with subagent"),
+  "new-thread": msg("Build in new thread"),
 };
 // Per device, shared by every plan and kept across reloads.
 const PLAN_BUILD_TARGET_STORAGE_KEY = "t3code:plan-build-target:v1";
@@ -216,6 +217,8 @@ export const PlanPanel = memo(function PlanPanel({
     "thread",
     PlanBuildTargetSchema,
   );
+  const gt = useGT();
+  const messages = useMessages();
   const runBuild = (target: PlanBuildTarget) => {
     const picked = choice ?? undefined;
     if (target === "subagent") onBuildWithSubagent(picked);
@@ -229,24 +232,32 @@ export const PlanPanel = memo(function PlanPanel({
     <div className="flex size-full min-h-0 min-w-0 flex-col" data-plan-panel="true">
       <div className="flex min-h-11 shrink-0 items-center gap-2 border-b border-border/60 px-3 py-1.5">
         <nav
-          aria-label="Plan breadcrumb"
+          aria-label={gt("Plan breadcrumb")}
           className="flex min-w-0 flex-1 items-center gap-1 text-sm text-muted-foreground"
         >
-          <span className="shrink-0">Plans</span>
+          <span className="shrink-0">
+            <T>Plans</T>
+          </span>
           <ChevronRightIcon aria-hidden="true" className="size-3.5 shrink-0" />
-          <span className="min-w-0 truncate font-medium text-foreground">{title ?? "Plan"}</span>
+          <span className="min-w-0 truncate font-medium text-foreground">
+            {title ?? gt("Plan")}
+          </span>
         </nav>
         {planMarkdown === null ? null : (
           <>
             <PlanModelPicker {...modelPicker} choice={choice} onChoose={setChoice} />
             <Group>
               <Button size="xs" disabled={buildDisabled} onClick={() => runBuild(buildTarget)}>
-                {PLAN_BUILD_TARGET_LABELS[buildTarget]}
+                {messages(PLAN_BUILD_TARGET_LABELS[buildTarget])}
               </Button>
               <Menu>
                 <MenuTrigger
                   render={
-                    <Button size="icon-xs" aria-label="Build options" disabled={buildDisabled} />
+                    <Button
+                      size="icon-xs"
+                      aria-label={gt("Build options")}
+                      disabled={buildDisabled}
+                    />
                   }
                 >
                   <ChevronDownIcon aria-hidden="true" className="size-3.5" />
@@ -259,7 +270,7 @@ export const PlanPanel = memo(function PlanPanel({
                     {PLAN_BUILD_TARGETS.map((target) => (
                       <MenuRadioItem key={target} value={target}>
                         <span className="flex items-center justify-between gap-4">
-                          {PLAN_BUILD_TARGET_LABELS[target]}
+                          {messages(PLAN_BUILD_TARGET_LABELS[target])}
                           <MenuRadioItemIndicator />
                         </span>
                       </MenuRadioItem>
@@ -274,7 +285,9 @@ export const PlanPanel = memo(function PlanPanel({
       <ScrollArea className="flex-1">
         <div className="px-4 py-4 sm:px-6">
           {planMarkdown === null ? (
-            <p className="text-sm text-muted-foreground">This plan is no longer available.</p>
+            <p className="text-sm text-muted-foreground">
+              <T>This plan is no longer available.</T>
+            </p>
           ) : (
             <ChatMarkdown
               text={displayedMarkdown}

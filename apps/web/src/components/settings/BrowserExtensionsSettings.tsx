@@ -6,12 +6,14 @@ import {
   type BrowserInstalledExtension,
   type BrowserInstalledExtensionsInput,
 } from "@t3tools/contracts";
+import { msg, T, useGT } from "gt-react";
 import { PlusIcon, Trash2Icon } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { previewBridge } from "~/components/preview/previewBridge";
 import { readLocalApi } from "~/localApi";
 
+import { m } from "../../i18n/messages";
 import { Button } from "../ui/button";
 import {
   Dialog,
@@ -43,7 +45,9 @@ const extensionFailureMessage = (cause: unknown): string => {
   const reason = BrowserExtensionFailureReason.literals.find((candidate) =>
     message.includes(`failed: ${candidate}.`),
   );
-  return reason === undefined ? "Something went wrong." : BROWSER_EXTENSION_FAILURE_COPY[reason];
+  return reason === undefined
+    ? m(msg("Something went wrong."))
+    : BROWSER_EXTENSION_FAILURE_COPY[reason];
 };
 
 interface ImportPicker {
@@ -53,6 +57,7 @@ interface ImportPicker {
 }
 
 export function BrowserExtensionsSetting({ disabled }: { readonly disabled: boolean }) {
+  const gt = useGT();
   const searchableSetting = useSearchableSetting();
   const [extensions, setExtensions] = useState<ReadonlyArray<BrowserExtension>>([]);
   const [sources, setSources] = useState<ReadonlyArray<BrowserImportSource>>([]);
@@ -83,7 +88,7 @@ export function BrowserExtensionsSetting({ disabled }: { readonly disabled: bool
     await action().then(setExtensions, (cause: unknown) => {
       toastManager.add({
         type: "error",
-        title: "Could not update extensions",
+        title: m(msg("Could not update extensions")),
         description: extensionFailureMessage(cause),
       });
     });
@@ -109,7 +114,7 @@ export function BrowserExtensionsSetting({ disabled }: { readonly disabled: bool
       setPicker(null);
       toastManager.add({
         type: "error",
-        title: "Could not read installed extensions",
+        title: m(msg("Could not read installed extensions")),
         description: extensionFailureMessage(cause),
       });
     }
@@ -134,22 +139,30 @@ export function BrowserExtensionsSetting({ disabled }: { readonly disabled: bool
     <>
       <SettingsRow
         {...searchableSetting("browser-extensions")}
-        description="Load unpacked Chromium extensions. Only part of the chrome.* API works, and there is no Web Store, toolbar icon, or popup. Incognito profiles skip them. Reload tabs after changes."
+        description={gt(
+          "Load unpacked Chromium extensions. Only part of the chrome.* API works, and there is no Web Store, toolbar icon, or popup. Incognito profiles skip them. Reload tabs after changes.",
+        )}
         control={
           <Menu>
             <MenuTrigger
               render={<Button size="sm" variant="outline" disabled={disabled || busy} />}
             >
               <PlusIcon />
-              Add extension
+              <T>Add extension</T>
             </MenuTrigger>
             <MenuPopup align="end">
-              <MenuItem onClick={() => void addFolder()}>Load unpacked folder…</MenuItem>
+              <MenuItem onClick={() => void addFolder()}>
+                <T>Load unpacked folder…</T>
+              </MenuItem>
               <MenuSeparator />
               <MenuGroup>
-                <MenuGroupLabel>Import from</MenuGroupLabel>
+                <MenuGroupLabel>
+                  <T>Import from</T>
+                </MenuGroupLabel>
                 {profiles.length === 0 ? (
-                  <MenuItem disabled>No Chromium browsers found</MenuItem>
+                  <MenuItem disabled>
+                    <T>No Chromium browsers found</T>
+                  </MenuItem>
                 ) : (
                   profiles.map((profile) => (
                     <MenuItem
@@ -180,7 +193,7 @@ export function BrowserExtensionsSetting({ disabled }: { readonly disabled: bool
                       size="icon-xs"
                       variant="ghost"
                       disabled={disabled || busy}
-                      aria-label={`Remove ${extension.name}`}
+                      aria-label={gt("Remove {name}", { name: extension.name })}
                       onClick={() => {
                         const bridge = previewBridge;
                         if (bridge) void change(() => bridge.removeBrowserExtension(extension.id));
@@ -190,7 +203,9 @@ export function BrowserExtensionsSetting({ disabled }: { readonly disabled: bool
                 >
                   <Trash2Icon />
                 </TooltipTrigger>
-                <TooltipPopup>Remove</TooltipPopup>
+                <TooltipPopup>
+                  <T>Remove</T>
+                </TooltipPopup>
               </Tooltip>
               <Switch
                 disabled={disabled || busy}
@@ -201,7 +216,7 @@ export function BrowserExtensionsSetting({ disabled }: { readonly disabled: bool
                     void change(() => bridge.setBrowserExtensionEnabled(extension.id, checked));
                   }
                 }}
-                aria-label={`${extension.name} enabled`}
+                aria-label={gt("{name} enabled", { name: extension.name })}
               />
             </div>
           }
@@ -210,17 +225,23 @@ export function BrowserExtensionsSetting({ disabled }: { readonly disabled: bool
       <Dialog open={picker !== null} onOpenChange={(open) => !open && setPicker(null)}>
         <DialogPopup>
           <DialogHeader>
-            <DialogTitle>Import from {picker?.label}</DialogTitle>
+            <DialogTitle>{gt("Import from {label}", { label: picker?.label ?? "" })}</DialogTitle>
             <DialogDescription>
-              The extension is copied, so updating or removing it in the browser does not affect it
-              here.
+              <T>
+                The extension is copied, so updating or removing it in the browser does not affect
+                it here.
+              </T>
             </DialogDescription>
           </DialogHeader>
           <DialogPanel>
             {picker?.extensions === null ? (
-              <p className="text-sm text-muted-foreground">Looking for extensions…</p>
+              <p className="text-sm text-muted-foreground">
+                <T>Looking for extensions…</T>
+              </p>
             ) : picker?.extensions.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No extensions found in this profile.</p>
+              <p className="text-sm text-muted-foreground">
+                <T>No extensions found in this profile.</T>
+              </p>
             ) : (
               <ul className="flex flex-col gap-2">
                 {picker?.extensions.map((installed) => (
@@ -235,7 +256,9 @@ export function BrowserExtensionsSetting({ disabled }: { readonly disabled: bool
                       disabled={installed.added || busy}
                       onClick={() => void importFromPicker(installed.id)}
                     >
-                      {installed.added ? "Added" : "Add"}
+                      {installed.added
+                        ? gt("Added")
+                        : gt("Add", { $context: "button, adds an extension" })}
                     </Button>
                   </li>
                 ))}
@@ -243,7 +266,9 @@ export function BrowserExtensionsSetting({ disabled }: { readonly disabled: bool
             )}
           </DialogPanel>
           <DialogFooter>
-            <DialogClose render={<Button variant="outline" />}>Close</DialogClose>
+            <DialogClose render={<Button variant="outline" />}>
+              <T>Close</T>
+            </DialogClose>
           </DialogFooter>
         </DialogPopup>
       </Dialog>

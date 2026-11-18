@@ -6,6 +6,9 @@ import {
   type ServerProvider,
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
+import { msg } from "gt-react";
+
+import { m, type MessageResolver } from "../../i18n/messages";
 
 /** One request the plugins page can send for a row or the add input. */
 export type PluginAction =
@@ -69,23 +72,25 @@ export function vanishedPluginTargets(
 type PluginsFailureContext = "load" | PluginAction["kind"];
 
 const FAILURE_HEADINGS: Readonly<Record<PluginsFailureContext, string>> = {
-  load: "Could not load plugins",
-  "add-marketplace": "Could not add marketplace",
-  "update-marketplace": "Could not update marketplace",
-  "remove-marketplace": "Could not remove marketplace",
-  "install-plugin": "Could not install plugin",
-  "set-plugin-enabled": "Could not change plugin",
-  "uninstall-plugin": "Could not uninstall plugin",
+  load: msg("Could not load plugins"),
+  "add-marketplace": msg("Could not add marketplace"),
+  "update-marketplace": msg("Could not update marketplace"),
+  "remove-marketplace": msg("Could not remove marketplace"),
+  "install-plugin": msg("Could not install plugin"),
+  "set-plugin-enabled": msg("Could not change plugin"),
+  "uninstall-plugin": msg("Could not uninstall plugin"),
 };
 
-export const PLUGIN_ACCESS_DENIED_MESSAGE =
-  "Repository not found or private - check the address or sign in to git";
+export const PLUGIN_ACCESS_DENIED_MESSAGE = msg(
+  "Repository not found or private - check the address or sign in to git",
+);
 
-const NOT_FOUND_MESSAGE =
-  "That marketplace or plugin no longer exists. Refresh the list and try again.";
+const NOT_FOUND_MESSAGE = msg(
+  "That marketplace or plugin no longer exists. Refresh the list and try again.",
+);
 
 /** Every access failure uses this heading, so it reads apart from a failed command. */
-const ACCESS_HEADING = "Access needed";
+const ACCESS_HEADING = msg("Access needed");
 
 const isProviderPluginsError = Schema.is(ProviderPluginsError);
 const isEnvironmentAuthorizationError = Schema.is(EnvironmentAuthorizationError);
@@ -103,14 +108,16 @@ export interface PluginsFailureView {
 export function describePluginsFailure(
   context: PluginsFailureContext,
   error: unknown,
+  resolve: MessageResolver = m,
 ): PluginsFailureView {
-  const heading = FAILURE_HEADINGS[context];
+  const heading = resolve(FAILURE_HEADINGS[context]);
+  const accessHeading = resolve(ACCESS_HEADING);
   if (isProviderPluginsError(error)) {
     switch (error.reason) {
       case "access_denied":
         return {
-          heading: ACCESS_HEADING,
-          message: PLUGIN_ACCESS_DENIED_MESSAGE,
+          heading: accessHeading,
+          message: resolve(PLUGIN_ACCESS_DENIED_MESSAGE),
           tone: "warning",
           needsAccess: true,
           retryable: true,
@@ -119,7 +126,7 @@ export function describePluginsFailure(
         // The server's detail names the problem, such as a source it cannot parse.
         return {
           heading,
-          message: error.detail.trim().length > 0 ? error.detail : NOT_FOUND_MESSAGE,
+          message: error.detail.trim().length > 0 ? error.detail : resolve(NOT_FOUND_MESSAGE),
           tone: "error",
           needsAccess: false,
           retryable: false,
@@ -127,7 +134,7 @@ export function describePluginsFailure(
       case "unsupported_provider":
         return {
           heading,
-          message: "This provider has no plugin system T3 Code can manage.",
+          message: resolve(msg("This provider has no plugin system T3 Code can manage.")),
           tone: "info",
           needsAccess: false,
           retryable: false,
@@ -135,7 +142,8 @@ export function describePluginsFailure(
       case "command_failed":
         return {
           heading,
-          message: error.detail.length > 0 ? error.detail : "The provider command failed.",
+          message:
+            error.detail.length > 0 ? error.detail : resolve(msg("The provider command failed.")),
           tone: "error",
           needsAccess: false,
           retryable: true,
@@ -145,11 +153,11 @@ export function describePluginsFailure(
   if (isEnvironmentAuthorizationError(error)) {
     // Say what this connection cannot do, not the scope it lacks.
     return {
-      heading: ACCESS_HEADING,
+      heading: accessHeading,
       message:
         context === "load"
-          ? "This connection cannot view plugins."
-          : "This connection cannot change plugins.",
+          ? resolve(msg("This connection cannot view plugins."))
+          : resolve(msg("This connection cannot change plugins.")),
       tone: "warning",
       needsAccess: true,
       retryable: false,
@@ -160,7 +168,7 @@ export function describePluginsFailure(
     message:
       error instanceof Error && error.message.length > 0
         ? error.message
-        : "The request did not complete. Try again.",
+        : resolve(msg("The request did not complete. Try again.")),
     tone: "error",
     needsAccess: false,
     retryable: true,
@@ -188,36 +196,49 @@ export function describePluginsReadiness(
     ServerProvider,
     "driver" | "enabled" | "installed" | "status" | "auth" | "message"
   >,
+  resolve: MessageResolver = m,
 ): PluginsReadinessView | null {
   const label = pluginsProviderLabel(instance.driver);
   if (!instance.enabled) {
     return {
-      heading: "Plugins unavailable",
-      message: `This ${label} instance is turned off. Turn it on in Providers to manage its plugins.`,
+      heading: resolve(msg("Plugins unavailable")),
+      message: resolve(
+        msg("This {label} instance is turned off. Turn it on in Providers to manage its plugins.", {
+          label,
+        }),
+      ),
       tone: "info",
       blocksChanges: true,
     };
   }
   if (!instance.installed) {
     return {
-      heading: "Plugins unavailable",
-      message: `${label} is not installed on this environment. Install it in Providers first.`,
+      heading: resolve(msg("Plugins unavailable")),
+      message: resolve(
+        msg("{label} is not installed on this environment. Install it in Providers first.", {
+          label,
+        }),
+      ),
       tone: "warning",
       blocksChanges: true,
     };
   }
   if (instance.status === "error") {
     return {
-      heading: `Check ${label}`,
-      message: instance.message ?? `${label} reported a problem. Check it in Providers.`,
+      heading: resolve(msg("Check {label}", { label })),
+      message:
+        instance.message ??
+        resolve(msg("{label} reported a problem. Check it in Providers.", { label })),
       tone: "warning",
       blocksChanges: false,
     };
   }
   if (instance.auth.status === "unauthenticated") {
     return {
-      heading: `Check ${label}`,
-      message: `${label} is not signed in. If plugin commands fail, sign in on Providers.`,
+      heading: resolve(msg("Check {label}", { label })),
+      message: resolve(
+        msg("{label} is not signed in. If plugin commands fail, sign in on Providers.", { label }),
+      ),
       tone: "info",
       blocksChanges: false,
     };
@@ -273,6 +294,6 @@ export function groupPluginsByMarketplace(
   return [...added, ...leftovers];
 }
 
-export function pluginCountLabel(count: number): string {
-  return count === 1 ? "1 plugin" : `${count} plugins`;
+export function pluginCountLabel(count: number, resolve: MessageResolver = m): string {
+  return resolve(msg("{count, plural, one {{count} plugin} other {{count} plugins}}", { count }));
 }

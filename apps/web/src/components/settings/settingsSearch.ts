@@ -321,10 +321,10 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "side-chat-model",
-    title: "Side chat model",
+    title: msg("Side chat model"),
     to: "/settings/threads",
     scope: "environment-defaults",
-    searchTerms: ["side chat question provider default model"],
+    searchTerms: [msg("side chat question provider default model")],
     environmentOnly: true,
   },
   {
@@ -994,9 +994,9 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "legacy-plan-mode",
-    title: "OpenCode plan agent (legacy)",
+    title: msg("OpenCode plan agent (legacy)"),
     to: "/settings/labs",
-    searchTerms: ["build plan composer old opencode agent"],
+    searchTerms: [msg("build plan composer old opencode agent")],
   },
   {
     id: "keybindings",
@@ -1056,10 +1056,12 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "plugins",
-    title: "Plugins",
+    title: msg("Plugins"),
     to: "/settings/plugins",
     searchTerms: [
-      "claude plugins plugin marketplace marketplaces github repository owner repo link add remove update install uninstall enable disable switch active",
+      msg(
+        "claude plugins plugin marketplace marketplaces github repository owner repo link add remove update install uninstall enable disable switch active",
+      ),
     ],
   },
   {
@@ -1198,15 +1200,15 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "browser-history-suggestions",
-    title: "Suggest history from",
+    title: msg("Suggest history from"),
     to: "/settings/browser",
-    searchTerms: ["address bar autocomplete chrome brave edge arc visited pages history"],
+    searchTerms: [msg("address bar autocomplete chrome brave edge arc visited pages history")],
   },
   {
     id: "browser-extensions",
-    title: "Extensions",
+    title: msg("Extensions"),
     to: "/settings/browser",
-    searchTerms: ["browser chrome extension unpacked crx add-on plugin load import"],
+    searchTerms: [msg("browser chrome extension unpacked crx add-on plugin load import")],
   },
   {
     id: "pull-request-links-open-in-app",
@@ -1320,32 +1322,32 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "explorer-subagent-model",
-    title: "Explorer model",
+    title: msg("Explorer model"),
     to: "/settings/providers",
-    searchTerms: ["subagents delegation preset model effort research exploration"],
+    searchTerms: [msg("subagents delegation preset model effort research exploration")],
     environmentOnly: true,
     scope: "project-defaults",
   },
   {
     id: "execution-subagent-model",
-    title: "Execution model",
+    title: msg("Execution model"),
     to: "/settings/providers",
-    searchTerms: ["subagents delegation preset model effort implementation test"],
+    searchTerms: [msg("subagents delegation preset model effort implementation test")],
     environmentOnly: true,
     scope: "project-defaults",
   },
   {
     id: "advisor-model",
-    title: "Advisor model",
+    title: msg("Advisor model"),
     to: "/settings/providers",
-    searchTerms: ["advisor second opinion consult model review judgment"],
+    searchTerms: [msg("advisor second opinion consult model review judgment")],
     environmentOnly: true,
   },
   {
     id: "advisor-auto-consult",
-    title: "Consult automatically",
+    title: msg("Consult automatically"),
     to: "/settings/providers",
-    searchTerms: ["advisor second opinion consult automatic auto"],
+    searchTerms: [msg("advisor second opinion consult automatic auto")],
     environmentOnly: true,
   },
   {

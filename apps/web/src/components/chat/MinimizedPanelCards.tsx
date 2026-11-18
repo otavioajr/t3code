@@ -2,8 +2,9 @@ import { useAtomValue } from "@effect/atom-react";
 import { terminalOutputText } from "@t3tools/client-runtime/state/terminal";
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 import type { ScopedThreadRef } from "@t3tools/contracts";
-import { getTerminalLabel } from "@t3tools/shared/terminalLabels";
+import { getTerminalLabel } from "@t3tools/shared/terminalLabelsCopy";
 import { previewPdfAssetUrl } from "@t3tools/shared/preview";
+import { msg, T, useGT, useMessages } from "gt-react";
 import { PanelRightIcon, XIcon } from "lucide-react";
 
 import { BrowserSurfaceSlot } from "~/browser/BrowserSurfaceSlot";
@@ -34,6 +35,7 @@ import { useEnvironmentHttpBaseUrl } from "~/state/environments";
 import { primaryEnvironmentIdAtom } from "~/state/primaryEnvironment";
 import { observedTerminalOutputAtom } from "~/state/terminalSessions";
 
+import { m, type MessageResolver } from "../../i18n/messages";
 import { DeviceStreamView } from "../device/DeviceStreamView";
 import { previewBridge } from "../preview/previewBridge";
 import SideChatPane from "./SideChatPane";
@@ -46,28 +48,28 @@ const TERMINAL_TAIL_LINES = 40;
 const ANSI_SEQUENCE =
   /\u001b(?:\[[0-?]*[ -/]*[@-~]|\][^\u0007\u001b]*(?:\u0007|\u001b\\)|[@-Z\\-_])/g;
 
-function cardTitle(surface: RightPanelSurface): string {
+function cardTitle(surface: RightPanelSurface, resolve: MessageResolver = m): string {
   switch (surface.kind) {
     case "preview":
-      return "Browser";
+      return resolve(msg("Browser"));
     case "terminal":
-      return surface.title ?? getTerminalLabel(surface.activeTerminalId);
+      return surface.title ?? getTerminalLabel(surface.activeTerminalId, resolve);
     case "device":
-      return surface.title ?? surface.target?.name ?? "Device";
+      return surface.title ?? surface.target?.name ?? resolve(msg("Device"));
     case "pull-request":
       return `#${surface.number}`;
     case "pull-requests":
-      return "Pull requests";
+      return resolve(msg("Pull requests"));
     case "plan":
-      return "Plan";
+      return resolve(msg("Plan"));
     case "issue":
       return /^\d+$/.test(surface.key) ? `#${surface.key}` : surface.key;
     case "side-chat":
-      return "Side chat";
+      return resolve(msg("Side chat"));
     case "diff":
-      return "Diff";
+      return resolve(msg("Diff"));
     case "files":
-      return "Files";
+      return resolve(msg("Files"));
     case "file":
       return surface.relativePath.split("/").at(-1) ?? surface.relativePath;
   }
@@ -83,6 +85,7 @@ export function MinimizedPanelCards(props: {
   readonly bottomInset?: number;
   readonly sideChatParentPanel: SideChatParentPanel;
 }) {
+  const gt = useGT();
   const minimized = useRightPanelStore(
     (state) => selectThreadRightPanelLayout(state, props.threadRef).minimized,
   );
@@ -98,7 +101,7 @@ export function MinimizedPanelCards(props: {
   if (props.placement === "details") {
     return (
       <section
-        aria-label="Minimized panels"
+        aria-label={gt("Minimized panels")}
         className="flex flex-col gap-2 p-2"
         data-thread-details-minimized-cards
       >
@@ -108,7 +111,7 @@ export function MinimizedPanelCards(props: {
   }
   return (
     <section
-      aria-label="Minimized panels"
+      aria-label={gt("Minimized panels")}
       className="pointer-events-none absolute right-3 z-30 flex w-72 max-w-[calc(100%-1.5rem)] flex-col gap-2"
       style={{ bottom: (props.bottomInset ?? 0) + 12 }}
       data-floating-minimized-cards
@@ -123,6 +126,8 @@ function MinimizedPanelCard(props: {
   readonly entry: MinimizedRightPanelGroup;
   readonly sideChatParentPanel: SideChatParentPanel;
 }) {
+  const gt = useGT();
+  const messages = useMessages();
   const { threadRef, entry } = props;
   const groupId = entry.group.id;
   const surfaces = useRightPanelStore(
@@ -133,9 +138,9 @@ function MinimizedPanelCard(props: {
   );
   const previewSessions = useThreadPreviewState(threadRef).sessions;
   const titleOf = (surface: RightPanelSurface) => {
-    if (surface.kind !== "preview" || !surface.resourceId) return cardTitle(surface);
+    if (surface.kind !== "preview" || !surface.resourceId) return cardTitle(surface, messages);
     const status = previewSessions[surface.resourceId]?.navStatus;
-    if (!status || status._tag === "Idle") return "Browser";
+    if (!status || status._tag === "Idle") return messages(msg("Browser"));
     return status.title.trim() || status.url;
   };
   const active = tabs.find((surface) => surface.id === entry.group.activeSurfaceId) ?? tabs[0];
@@ -152,7 +157,7 @@ function MinimizedPanelCard(props: {
       <TooltipTrigger
         render={
           <Button
-            aria-label={`Restore ${title}`}
+            aria-label={gt("Restore {title}", { title })}
             size="icon-xs"
             variant="ghost"
             onClick={() => store().restoreGroup(threadRef, groupId)}
@@ -161,7 +166,9 @@ function MinimizedPanelCard(props: {
       >
         <PanelRightIcon />
       </TooltipTrigger>
-      <TooltipPopup side="top">Restore</TooltipPopup>
+      <TooltipPopup side="top">
+        <T>Restore</T>
+      </TooltipPopup>
     </Tooltip>
   );
   const cardClassName = cn(
@@ -172,7 +179,7 @@ function MinimizedPanelCard(props: {
   if (sideChat && tabs.length === 1) {
     return (
       <article
-        aria-label={`Minimized ${title}`}
+        aria-label={gt("Minimized {title}", { title })}
         data-minimized-panel-card={groupId}
         className={cardClassName}
       >
@@ -190,7 +197,7 @@ function MinimizedPanelCard(props: {
 
   return (
     <article
-      aria-label={`Minimized ${title}`}
+      aria-label={gt("Minimized {title}", { title })}
       data-minimized-panel-card={groupId}
       className={cardClassName}
     >
@@ -218,7 +225,7 @@ function MinimizedPanelCard(props: {
                   store().selectGroupSurface(threadRef, groupId, value);
               }}
             >
-              <SelectTrigger size="xs" aria-label="Shown tab">
+              <SelectTrigger size="xs" aria-label={gt("Shown tab")}>
                 <SelectValue>{title}</SelectValue>
               </SelectTrigger>
               <SelectPopup>
@@ -238,7 +245,7 @@ function MinimizedPanelCard(props: {
           <TooltipTrigger
             render={
               <Button
-                aria-label={`Close ${title}`}
+                aria-label={gt("Close {title}", { title })}
                 size="icon-xs"
                 variant="ghost"
                 onClick={() => store().closeGroup(threadRef, groupId)}
@@ -247,7 +254,9 @@ function MinimizedPanelCard(props: {
           >
             <XIcon />
           </TooltipTrigger>
-          <TooltipPopup side="top">Close</TooltipPopup>
+          <TooltipPopup side="top">
+            <T>Close</T>
+          </TooltipPopup>
         </Tooltip>
       </div>
     </article>
@@ -259,19 +268,21 @@ function CardPreview(props: {
   readonly surface: RightPanelSurface;
   readonly sideChatParentPanel: SideChatParentPanel;
 }) {
+  const gt = useGT();
+  const messages = useMessages();
   const { surface } = props;
   switch (surface.kind) {
     case "preview":
       return surface.resourceId ? (
         <BrowserCardPreview threadRef={props.threadRef} tabId={surface.resourceId} />
       ) : (
-        <StaticCardPreview label="Browser" />
+        <StaticCardPreview label={gt("Browser")} />
       );
     case "device":
       return surface.target ? (
         <DeviceCardPreview threadRef={props.threadRef} target={surface.target} />
       ) : (
-        <StaticCardPreview label="Device" />
+        <StaticCardPreview label={gt("Device")} />
       );
     case "terminal":
       return (
@@ -287,7 +298,7 @@ function CardPreview(props: {
         />
       );
     default:
-      return <StaticCardPreview label={cardTitle(surface)} />;
+      return <StaticCardPreview label={cardTitle(surface, messages)} />;
   }
 }
 
@@ -303,12 +314,13 @@ function BrowserCardPreview(props: {
   readonly threadRef: ScopedThreadRef;
   readonly tabId: string;
 }) {
+  const gt = useGT();
   const { threadRef, tabId } = props;
   const previewState = useThreadPreviewState(threadRef);
   const httpBaseUrl = useEnvironmentHttpBaseUrl(threadRef.environmentId);
   const primaryEnvironmentId = useAtomValue(primaryEnvironmentIdAtom);
   const snapshot = previewState.sessions[tabId] ?? null;
-  if (!snapshot) return <StaticCardPreview label="Browser" />;
+  if (!snapshot) return <StaticCardPreview label={gt("Browser")} />;
   const runtimeTabId = previewRuntimeTabId(threadRef, previewState.serverEpoch, tabId);
   const desktopOverlay = previewState.desktopByTabId[tabId] ?? null;
   const serverTab =
@@ -331,7 +343,7 @@ function BrowserCardPreview(props: {
       />
     );
   }
-  if (!previewBridge) return <StaticCardPreview label="Open in the desktop app" />;
+  if (!previewBridge) return <StaticCardPreview label={gt("Open in the desktop app")} />;
   return (
     <BrowserSurfaceSlot
       tabId={runtimeTabId}
@@ -348,6 +360,7 @@ function DeviceCardPreview(props: {
   readonly threadRef: ScopedThreadRef;
   readonly target: NonNullable<Extract<RightPanelSurface, { kind: "device" }>["target"]>;
 }) {
+  const gt = useGT();
   const { threadRef, target } = props;
   const { state } = useDeviceState(threadRef.environmentId);
   const device = state.devices.find(
@@ -362,7 +375,7 @@ function DeviceCardPreview(props: {
         deviceId={target.deviceId}
         hostId={target.hostId}
         deviceName={device?.name ?? target.name}
-        deviceDescription={`${host?.label ?? "Device host"} · ${device?.version ?? target.platform}`}
+        deviceDescription={`${host?.label ?? gt("Device host")} · ${device?.version ?? target.platform}`}
         visible
         viewId={`minimized-card\u0000${scopedThreadKey(threadRef)}\u0000${target.hostId}\u0000${target.deviceId}`}
         serveSimOnly={host?.kind === "simlock"}
@@ -376,6 +389,7 @@ function TerminalCardPreview(props: {
   readonly threadRef: ScopedThreadRef;
   readonly terminalId: string;
 }) {
+  const gt = useGT();
   const output = useAtomValue(
     observedTerminalOutputAtom(
       props.threadRef.environmentId,
@@ -387,7 +401,7 @@ function TerminalCardPreview(props: {
   const tail = text.split(/\r?\n/).slice(-TERMINAL_TAIL_LINES).join("\n");
   return (
     <pre
-      aria-label="Terminal output"
+      aria-label={gt("Terminal output")}
       className="flex size-full flex-col justify-end overflow-hidden whitespace-pre-wrap break-all bg-background p-2 font-mono text-3xs leading-tight text-foreground/80"
     >
       {tail}

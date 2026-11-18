@@ -1,5 +1,6 @@
 import type { SplitViewKeybindingCommand } from "@t3tools/contracts";
 import { useAtomValue } from "@effect/atom-react";
+import { msg, useGT, useMessages } from "gt-react";
 import { Columns2Icon, XIcon } from "lucide-react";
 
 import { shortcutLabelForCommand } from "../../keybindings";
@@ -11,15 +12,15 @@ import { Button } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuShortcut, MenuTrigger } from "../ui/menu";
 
 const SPLIT_MENU_ITEMS: ReadonlyArray<readonly [SplitViewKeybindingCommand, string]> = [
-  ["splitView.splitRight", "New split right"],
-  ["splitView.splitDown", "New split below"],
-  ["splitView.focusNext", "Focus next pane"],
-  ["splitView.focusPrevious", "Focus previous pane"],
-  ["splitView.moveLeft", "Move split left"],
-  ["splitView.moveRight", "Move split right"],
-  ["splitView.moveUp", "Move split up"],
-  ["splitView.moveDown", "Move split down"],
-  ["splitView.close", "Close split"],
+  ["splitView.splitRight", msg("New split right")],
+  ["splitView.splitDown", msg("New split below")],
+  ["splitView.focusNext", msg("Focus next pane")],
+  ["splitView.focusPrevious", msg("Focus previous pane")],
+  ["splitView.moveLeft", msg("Move split left")],
+  ["splitView.moveRight", msg("Move split right")],
+  ["splitView.moveUp", msg("Move split up")],
+  ["splitView.moveDown", msg("Move split down")],
+  ["splitView.close", msg("Close split")],
 ];
 
 /**
@@ -30,39 +31,46 @@ export function SplitPaneHeaderControls(props: {
   readonly pane: ChatPane;
   readonly panels: PanelLayoutControlsProps;
 }) {
+  const gt = useGT();
+  const messages = useMessages();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const { panels } = props;
   return (
     <div className="flex shrink-0 items-center gap-1 [-webkit-app-region:no-drag]">
       <Menu>
         <MenuTrigger
-          render={<Button variant="ghost" size="icon-xs" aria-label="Split view options" />}
+          render={<Button variant="ghost" size="icon-xs" aria-label={gt("Split view options")} />}
         >
           <Columns2Icon />
         </MenuTrigger>
         <MenuPopup align="end">
           <MenuItem disabled={!panels.terminalAvailable} onClick={panels.onToggleTerminal}>
-            {panels.terminalOpen ? "Hide terminal" : "Show terminal"}
+            {panels.terminalOpen ? gt("Hide terminal") : gt("Show terminal")}
           </MenuItem>
           <MenuItem onClick={panels.onToggleThreadPanel}>
-            {panels.threadPanelOpen ? "Hide thread details" : "Show thread details"}
+            {panels.threadPanelOpen ? gt("Hide thread details") : gt("Show thread details")}
           </MenuItem>
           <MenuItem disabled={!panels.rightPanelAvailable} onClick={panels.onToggleRightPanel}>
-            {panels.rightPanelOpen ? "Hide side panel" : "Show side panel"}
+            {panels.rightPanelOpen ? gt("Hide side panel") : gt("Show side panel")}
           </MenuItem>
           <MenuSeparator />
           {SPLIT_MENU_ITEMS.map(([command, label]) => {
             const shortcut = shortcutLabelForCommand(keybindings, command);
             return (
               <MenuItem key={command} onClick={() => dispatchMenuAction(command)}>
-                {label}
+                {messages(label)}
                 {shortcut ? <MenuShortcut>{shortcut}</MenuShortcut> : null}
               </MenuItem>
             );
           })}
         </MenuPopup>
       </Menu>
-      <Button variant="ghost" size="icon-xs" aria-label="Close split" onClick={props.pane.close}>
+      <Button
+        variant="ghost"
+        size="icon-xs"
+        aria-label={gt("Close split")}
+        onClick={props.pane.close}
+      >
         <XIcon />
       </Button>
     </div>

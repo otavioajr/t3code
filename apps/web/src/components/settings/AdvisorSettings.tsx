@@ -1,4 +1,5 @@
 import { createModelSelection } from "@t3tools/shared/model";
+import { T, useGT } from "gt-react";
 
 import {
   getCustomModelOptionsByInstance,
@@ -22,6 +23,7 @@ import {
 } from "./useScopedSettings";
 
 function AdvisorModelRow() {
+  const gt = useGT();
   const searchableSetting = useSearchableSetting();
   const { environment, connectedEnvironments } = useSettingsScope();
   const settings = useScopedSettings();
@@ -61,7 +63,11 @@ function AdvisorModelRow() {
   const setModel = (next: ReturnType<typeof createModelSelection>) => {
     const reason = modelDisabledReason(next.instanceId, next.model);
     if (reason) {
-      toastManager.add({ type: "error", title: "Advisor model not saved", description: reason });
+      toastManager.add({
+        type: "error",
+        title: gt("Advisor model not saved"),
+        description: reason,
+      });
       return;
     }
     updateSettings({ advisorModelSelection: next });
@@ -72,15 +78,19 @@ function AdvisorModelRow() {
       settingKeys={["advisorModelSelection"]}
       mixed={mixed}
       {...searchableSetting("advisor-model")}
-      description="Model agents consult for a second opinion. Threads can pick their own. When disabled, use the text generation model."
+      description={gt(
+        "Model agents consult for a second opinion. Threads can pick their own. When disabled, use the text generation model.",
+      )}
       control={
         connectedEnvironments.length === 0 ? (
-          <span className="text-sm text-muted-foreground">Connect an environment first.</span>
+          <span className="text-sm text-muted-foreground">
+            <T>Connect an environment first.</T>
+          </span>
         ) : (
           <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
             {dedicated && !mixed && (!hasProvider || !instanceEntry) ? (
               <span className="text-sm text-muted-foreground">
-                No text generation providers available.
+                <T>No text generation providers available.</T>
               </span>
             ) : null}
             {dedicated && !mixed && hasProvider && instanceEntry ? (
@@ -93,7 +103,7 @@ function AdvisorModelRow() {
                   instanceEntries={instanceEntries}
                   modelOptionsByInstance={modelOptionsByInstance}
                   triggerClassName={SETTINGS_PICKER_TRIGGER_CLASSNAME}
-                  triggerAriaLabel="Advisor model"
+                  triggerAriaLabel={gt("Advisor model")}
                   getModelDisabledReason={modelDisabledReason}
                   onInstanceModelChange={(instanceId, model) =>
                     setModel(createModelSelection(instanceId, model))
@@ -128,7 +138,7 @@ function AdvisorModelRow() {
                     : null,
                 })
               }
-              aria-label="Use a separate advisor model"
+              aria-label={gt("Use a separate advisor model")}
             />
           </div>
         )
@@ -138,25 +148,28 @@ function AdvisorModelRow() {
 }
 
 export function AdvisorSettings() {
+  const gt = useGT();
   const searchableSetting = useSearchableSetting();
   const settings = useScopedSettings();
   const updateSettings = useUpdateScopedSettings();
   const mixed = useScopedSettingsMixed(["advisorAutoConsult"]);
   return (
-    <SettingsSection id="advisor" title="Advisor">
+    <SettingsSection id="advisor" title={gt("Advisor")}>
       <AdvisorModelRow />
       <SettingsRow
         serverScoped
         settingKeys={["advisorAutoConsult"]}
         mixed={mixed}
         {...searchableSetting("advisor-auto-consult")}
-        description="Agents decide when to consult the advisor, such as before a design decision or after failed attempts. Off, they consult it only when you turn on Advisor for a message."
+        description={gt(
+          "Agents decide when to consult the advisor, such as before a design decision or after failed attempts. Off, they consult it only when you turn on Advisor for a message.",
+        )}
         control={
           <Switch
             mixed={mixed}
             checked={mixed ? false : settings.advisorAutoConsult}
             onCheckedChange={(checked) => updateSettings({ advisorAutoConsult: Boolean(checked) })}
-            aria-label="Consult the advisor automatically"
+            aria-label={gt("Consult the advisor automatically")}
           />
         }
       />

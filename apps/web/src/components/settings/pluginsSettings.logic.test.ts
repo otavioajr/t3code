@@ -7,6 +7,7 @@ import {
   type ProviderPluginsSnapshot,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
+import { m } from "../../i18n/messages";
 
 import {
   describePluginsFailure,
@@ -27,7 +28,7 @@ describe("describePluginsFailure", () => {
   it("asks for access or sign-in when a marketplace repository is private", () => {
     expect(describePluginsFailure("add-marketplace", pluginsError("access_denied"))).toEqual({
       heading: "Access needed",
-      message: PLUGIN_ACCESS_DENIED_MESSAGE,
+      message: m(PLUGIN_ACCESS_DENIED_MESSAGE),
       tone: "warning",
       needsAccess: true,
       retryable: true,

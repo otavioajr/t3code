@@ -1,5 +1,6 @@
 import type { ProviderInstanceId } from "@t3tools/contracts";
 import { createModelSelection } from "@t3tools/shared/model";
+import { useGT } from "gt-react";
 
 import { getCustomModelOptionsByInstance, selectsPlanAgent } from "../../modelSelection";
 import { providerInstanceEntriesFor } from "../../providerInstances";
@@ -27,6 +28,7 @@ function SubagentModelRow({
   settingKey: PresetKey;
   kind: "Explorer" | "Execution";
 }) {
+  const gt = useGT();
   const searchableSetting = useSearchableSetting();
   const settings = useScopedSettings();
   const updateSettings = useUpdateScopedSettings();
@@ -50,7 +52,7 @@ function SubagentModelRow({
       entry.status === "disabled" ||
       entry.snapshot.auth.status === "unauthenticated"
     ) {
-      return "This provider cannot run a child task.";
+      return gt("This provider cannot run a child task.");
     }
     return scopedDisabledReason(instanceId, model);
   };
@@ -85,8 +87,10 @@ function SubagentModelRow({
       )}
       description={
         kind === "Explorer"
-          ? "Model for research subagents. Off inherits the parent thread’s model."
-          : "Model for implementation and test subagents. Off inherits the parent thread’s model."
+          ? gt("Model for research subagents. Off inherits the parent thread’s model.")
+          : gt(
+              "Model for implementation and test subagents. Off inherits the parent thread’s model.",
+            )
       }
       control={
         <div className="flex flex-wrap items-center justify-end gap-2">
@@ -99,8 +103,8 @@ function SubagentModelRow({
               instanceEntries={entries}
               modelOptionsByInstance={pickerOptions}
               triggerClassName={SETTINGS_PICKER_TRIGGER_CLASSNAME}
-              triggerAriaLabel={`${kind} model`}
-              {...(mixed ? { triggerLabel: "Mixed" } : {})}
+              triggerAriaLabel={kind === "Explorer" ? gt("Explorer model") : gt("Execution model")}
+              {...(mixed ? { triggerLabel: gt("Mixed") } : {})}
               getModelDisabledReason={disabledReason}
               onInstanceModelChange={(instanceId, model) => {
                 if (!disabledReason(instanceId, model)) {
@@ -133,7 +137,11 @@ function SubagentModelRow({
               if (!checked) updateSettings({ [settingKey]: null });
               else if (fallback) updateSettings({ [settingKey]: fallback });
             }}
-            aria-label={`Use a separate ${kind.toLowerCase()} model`}
+            aria-label={
+              kind === "Explorer"
+                ? gt("Use a separate explorer model")
+                : gt("Use a separate execution model")
+            }
           />
         </div>
       }
@@ -142,8 +150,9 @@ function SubagentModelRow({
 }
 
 export function SubagentSettings() {
+  const gt = useGT();
   return (
-    <SettingsSection id="subagents" title="Subagents">
+    <SettingsSection id="subagents" title={gt("Subagents")}>
       <SubagentModelRow settingKey="explorerSubagentModelSelection" kind="Explorer" />
       <SubagentModelRow settingKey="executionSubagentModelSelection" kind="Execution" />
     </SettingsSection>

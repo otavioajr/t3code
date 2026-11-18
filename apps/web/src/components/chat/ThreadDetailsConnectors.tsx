@@ -1,4 +1,5 @@
 import type { OrchestrationV2ProviderMcpServer } from "@t3tools/contracts";
+import { msg, useGT, useMessages } from "gt-react";
 import { useState } from "react";
 
 import { cn } from "../../lib/utils";
@@ -9,11 +10,11 @@ const STATUS: Record<
   OrchestrationV2ProviderMcpServer["status"],
   { readonly label: string; readonly dot: string }
 > = {
-  connected: { label: "Connected", dot: "bg-success" },
-  pending: { label: "Connecting", dot: "bg-muted-foreground/60" },
-  needs_auth: { label: "Needs auth", dot: "bg-warning" },
-  failed: { label: "Failed", dot: "bg-error" },
-  disabled: { label: "Disabled", dot: "bg-muted-foreground/30" },
+  connected: { label: msg("Connected"), dot: "bg-success" },
+  pending: { label: msg("Connecting"), dot: "bg-muted-foreground/60" },
+  needs_auth: { label: msg("Needs auth"), dot: "bg-warning" },
+  failed: { label: msg("Failed"), dot: "bg-error" },
+  disabled: { label: msg("Disabled"), dot: "bg-muted-foreground/30" },
 };
 
 /** MCP servers the thread's provider session reported. Hidden when it reports none. */
@@ -22,6 +23,8 @@ export function ThreadDetailsConnectors({
 }: {
   readonly servers: ReadonlyArray<OrchestrationV2ProviderMcpServer>;
 }) {
+  const gt = useGT();
+  const messages = useMessages();
   const [open, setOpen] = useState(false);
   if (servers.length === 0) return null;
   const connected = servers.filter((server) => server.status === "connected").length;
@@ -31,13 +34,13 @@ export function ThreadDetailsConnectors({
   return (
     <ThreadDetailsSection
       headingId="thread-details-connectors-heading"
-      title="Connectors"
+      title={gt("Connectors")}
       showHeading={false}
     >
       <div>
         <ThreadDetailsDisclosure
-          label="Connectors"
-          value={`Connected: ${connected}`}
+          label={gt("Connectors")}
+          value={gt("Connected: {count}", { count: connected })}
           tone={attention ? "warning" : null}
           open={open}
           onOpenChange={setOpen}
@@ -52,7 +55,7 @@ export function ThreadDetailsConnectors({
                 />
                 <span className="min-w-0 flex-1 truncate text-foreground/80">{server.name}</span>
                 <span className="shrink-0 text-muted-foreground">
-                  {STATUS[server.status].label}
+                  {messages(STATUS[server.status].label)}
                 </span>
               </li>
             ))}
