@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest";
 
-import { buildRuntimeInstructions } from "./runtimeInstructions.ts";
+import { buildRuntimeInstructions, userAgentRules } from "./runtimeInstructions.ts";
 
 describe("buildRuntimeInstructions", () => {
   it("leaves PR linking to a session that already carries it, and keeps runtime identity", () => {
@@ -51,5 +51,16 @@ describe("buildRuntimeInstructions", () => {
       "For PR waits, no sleep, loops, gh --watch, Monitor or ScheduleWakeup.",
     );
     assert.include(instructions, "call unwatch_pull_request");
+  });
+});
+
+describe("userAgentRules", () => {
+  it("wraps the environment's rules and adds nothing when they are blank", () => {
+    assert.strictEqual(userAgentRules(undefined), "");
+    assert.strictEqual(userAgentRules("  \n "), "");
+    assert.strictEqual(
+      userAgentRules("  Answer in Portuguese.\n"),
+      "<user_agent_rules>\nAnswer in Portuguese.\n</user_agent_rules>",
+    );
   });
 });

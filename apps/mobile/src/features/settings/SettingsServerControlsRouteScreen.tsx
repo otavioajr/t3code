@@ -24,6 +24,7 @@ import {
 } from "../threads/thread-settings-options";
 import { SettingsScreen } from "./components/SettingsScreen";
 import { useSettingsEnvironmentMenu } from "./components/SettingsEnvironmentFilterHeader";
+import { AgentRulesSettings } from "./components/AgentRulesSettings";
 import { BranchNamingSettings } from "./components/BranchNamingSettings";
 import { DatabaseStorageNotice } from "./components/DatabaseStorageNotice";
 import { ListChoiceRow as SettingsChoiceRow } from "../../components/ui/ListChoiceRow";
@@ -408,6 +409,18 @@ function ServerSettingsDetail(props: { readonly page: SettingsPage }) {
                   />
                 </SettingsSection>
                 <AutoSettleSettingsRows write={write} pending={pendingWrites > 0} />
+                <AgentRulesSettings
+                  key={targetsKey}
+                  rules={uniform("agentInstructions")}
+                  disabled={disabledFor("agentInstructions")}
+                  footer={
+                    managed("agentInstructions") ??
+                    (projectSelected
+                      ? gt("Environment-wide setting. Select All projects to change it.")
+                      : undefined)
+                  }
+                  onChange={write}
+                />
               </>
             ) : null}
 

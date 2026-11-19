@@ -5,6 +5,7 @@ import { describe, it } from "vite-plus/test";
 
 import {
   buildCodexAdditionalContext,
+  buildCodexAgentRulesContext,
   CODEX_ADDITIONAL_CONTEXT_VALUE_MAX_BYTES,
 } from "./CodexDeveloperInstructions.ts";
 
@@ -82,3 +83,36 @@ describe("Codex device context", () => {
 function runtimeInstructions(runtime: Parameters<typeof buildCodexAdditionalContext>[0]) {
   return buildCodexAdditionalContext(runtime).t3_code_runtime!.value;
 }
+
+describe("Codex agent rules context", () => {
+  it("sends no entry without rules", () => {
+    NodeAssert.deepEqual(buildCodexAgentRulesContext(" "), {});
+  });
+
+  it("splits long rules into ordered entries within the cap, losing no text", () => {
+    const line = "Regra: responda em português e peça permissão antes de alterar arquivos. 🦊";
+    const rules = [
+      ...Array.from({ length: 120 }, (_, index) => `${index}. ${line}`),
+      "x".repeat(9_000),
+    ].join("\n");
+    const context = buildCodexAgentRulesContext(rules);
+    const keys = Object.keys(context);
+
+    NodeAssert.ok(keys.length > 2);
+    NodeAssert.deepEqual(keys, [...keys].toSorted());
+    NodeAssert.equal(keys[0], "t3_code_user_rules_01");
+    for (const entry of Object.values(context)) {
+      NodeAssert.equal(entry.kind, "application");
+      NodeAssert.ok(
+        Buffer.byteLength(entry.value, "utf8") <= CODEX_ADDITIONAL_CONTEXT_VALUE_MAX_BYTES,
+      );
+    }
+    NodeAssert.equal(
+      Object.values(context)
+        .map((entry) => entry.value)
+        .join("")
+        .replaceAll("\n", ""),
+      `<user_agent_rules>\n${rules}\n</user_agent_rules>`.replaceAll("\n", ""),
+    );
+  });
+});

@@ -26,6 +26,17 @@ export function buildRuntimeInstructions(runtime: {
     : `${runtimeInfo}\n\n${PULL_REQUEST_LINKING_INSTRUCTIONS}`;
 }
 
+/** The environment's "Agent rules" setting, or "" when unset. */
+export function userAgentRules(text: string | undefined): string {
+  const rules = text?.trim() ?? "";
+  return rules ? `<user_agent_rules>\n${rules}\n</user_agent_rules>` : "";
+}
+
+/** Joins instruction blocks, skipping empty ones. */
+export function joinInstructionBlocks(...blocks: ReadonlyArray<string | undefined>): string {
+  return blocks.filter((block): block is string => Boolean(block)).join("\n\n");
+}
+
 function toSingleLine(value: string): string {
   return value.replaceAll(/\s+/g, " ").trim();
 }

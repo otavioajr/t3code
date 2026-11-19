@@ -115,7 +115,11 @@ import {
   t3AcpPromptWithInstructions,
   type T3AcpInstructionState,
 } from "@t3tools/provider-core/server/orchestrationInstructions";
-import { buildRuntimeInstructions } from "@t3tools/provider-core/server/runtimeInstructions";
+import {
+  buildRuntimeInstructions,
+  joinInstructionBlocks,
+  userAgentRules,
+} from "@t3tools/provider-core/server/runtimeInstructions";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import type * as ProviderContinuationRequests from "@t3tools/provider-core/server/ProviderContinuationRequests";
 import {
@@ -1867,6 +1871,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
     }),
     openSession: Effect.fn("AcpAdapterV2.openSession")(
       function* (input: ProviderAdapter.ProviderAdapterV2OpenSessionInput) {
+        const agentInstructions = input.agentInstructions ?? Effect.succeed("");
         const sessionScope = yield* Effect.scope;
         let itemIdentityVersion: 2 | undefined =
           input.initialProviderItemIdentityVersion ??
@@ -8480,13 +8485,16 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
               : { previousState: previousInstructionState }),
           });
           const sessionSetup = yield* Ref.get(activeSessionSetup);
-          const runtimeInstructions = buildRuntimeInstructions({
-            harness: flavor.runtimeHarness ?? driver,
-            model: turnInput.modelSelection.model,
-            pullRequestLinking:
-              sessionSetup === null ||
-              flavor.sessionCarriesPullRequestLinking?.(sessionSetup.initializeResult) !== true,
-          });
+          const runtimeInstructions = joinInstructionBlocks(
+            userAgentRules(yield* agentInstructions),
+            buildRuntimeInstructions({
+              harness: flavor.runtimeHarness ?? driver,
+              model: turnInput.modelSelection.model,
+              pullRequestLinking:
+                sessionSetup === null ||
+                flavor.sessionCarriesPullRequestLinking?.(sessionSetup.initializeResult) !== true,
+            }),
+          );
           // The agent keeps its own history, so resend only after compaction or when the text changes.
           const sendRuntimeInstructions =
             !isNativeSlashCommand &&

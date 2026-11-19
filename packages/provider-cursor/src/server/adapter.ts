@@ -58,7 +58,11 @@ import {
 } from "./skills.ts";
 import { cursorWorkspaceMcpServers } from "./workspaceMcpServers.ts";
 import { t3OrchestrationPrompt } from "@t3tools/provider-core/server/orchestrationInstructions";
-import { buildRuntimeInstructions } from "@t3tools/provider-core/server/runtimeInstructions";
+import {
+  buildRuntimeInstructions,
+  joinInstructionBlocks,
+  userAgentRules,
+} from "@t3tools/provider-core/server/runtimeInstructions";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import { makeProviderFailure } from "@t3tools/provider-core/server/failure";
 import { turnScopedSelectionTransition } from "@t3tools/provider-core/server/selectionTransition";
@@ -1059,7 +1063,10 @@ export const makeCursorAdapterV2 = Effect.fn("makeCursorAdapterV2")(function* (
           readonly agent: string;
           readonly orchestration: boolean;
           readonly device: boolean;
+          /** The rules block last sent, so a changed setting is sent again. */
+          readonly rules: string;
         } | null>(null);
+        const agentInstructions = input.agentInstructions ?? Effect.succeed("");
         // Cursor drops a run cancelled before its first checkpoint, so the next message carries its prompt.
         const interruptedPrompt = yield* Ref.make<{
           readonly agent: string;
@@ -2619,6 +2626,7 @@ export const makeCursorAdapterV2 = Effect.fn("makeCursorAdapterV2")(function* (
           mcpServers: Record<string, McpServerConfig> | undefined,
           hasDeviceTools: boolean,
           delivered: { readonly orchestration: boolean; readonly device: boolean },
+          rules: string,
           interrupted: string | undefined,
         ) {
           const rawText = turnInput.message.text;
@@ -2679,7 +2687,11 @@ export const makeCursorAdapterV2 = Effect.fn("makeCursorAdapterV2")(function* (
               detail: "Cursor turn requires non-empty text or attachments.",
             });
           }
-          const text = `${userText}\n\n${buildRuntimeInstructions({ harness: "Cursor", model: turnInput.modelSelection.model })}`;
+          const text = joinInstructionBlocks(
+            userText,
+            rules,
+            buildRuntimeInstructions({ harness: "Cursor", model: turnInput.modelSelection.model }),
+          );
           return {
             message: images.length === 0 ? text : ({ text, images } satisfies SDKUserMessage),
             prompt: userText,
@@ -2717,7 +2729,11 @@ export const makeCursorAdapterV2 = Effect.fn("makeCursorAdapterV2")(function* (
                 : {
                     orchestration: turnInput.nativeThreadHasTurns ?? turnInput.runOrdinal > 1,
                     device: false,
+                    rules: "",
                   };
+            // Rules ride on the user message, so send them only when the conversation lacks them.
+            const currentRules = userAgentRules(yield* agentInstructions);
+            const rules = currentRules === delivered.rules ? "" : currentRules;
             const interrupted = yield* Ref.get(interruptedPrompt);
             const runCheckpointed = (runId?: string) =>
               agent.session.runCheckpointed?.(runId) ?? Effect.succeed(false);
@@ -2754,6 +2770,7 @@ export const makeCursorAdapterV2 = Effect.fn("makeCursorAdapterV2")(function* (
                       mcpServers,
                       hasDeviceTools,
                       delivered,
+                      rules,
                       dropped?.text,
                     );
             const compacted = resume === undefined && prompt === undefined;
@@ -2796,6 +2813,7 @@ export const makeCursorAdapterV2 = Effect.fn("makeCursorAdapterV2")(function* (
                 agent: agent.nativeThreadId,
                 orchestration: !compacted && (delivered.orchestration || mcpServers !== undefined),
                 device: !compacted && hasDeviceTools,
+                rules: compacted ? "" : currentRules,
               });
             }
             if (!compacted && resume !== "native") {
@@ -3262,7 +3280,7 @@ export const makeCursorAdapterV2 = Effect.fn("makeCursorAdapterV2")(function* (
               // The kept turns may predate a compaction, so the instructions are sent again.
               const forgetConversation = (agent: string) =>
                 Effect.all([
-                  Ref.set(told, { agent, orchestration: false, device: false }),
+                  Ref.set(told, { agent, orchestration: false, device: false, rules: "" }),
                   Ref.set(interruptedPrompt, null),
                   Ref.set(resumedAgent, null),
                 ]);

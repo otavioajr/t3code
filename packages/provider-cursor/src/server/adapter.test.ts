@@ -28,6 +28,7 @@ import { spawnAndCollect } from "@t3tools/provider-core/server/snapshotProbe";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Ref from "effect/Ref";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Stream from "effect/Stream";
@@ -827,11 +828,13 @@ describe("CursorAdapterV2", () => {
         }),
         Effect.provide(TestProviderHost.layer({ cwd: workspace })),
       );
+      const agentRules = yield* Ref.make("");
       const runtime = yield* adapter.openSession({
         threadId,
         providerSessionId: ProviderSessionId.make("cursor-device-session"),
         modelSelection,
         runtimePolicy,
+        agentInstructions: Ref.get(agentRules),
       });
       let providerThread = yield* runtime.ensureThread({
         threadId,
@@ -899,9 +902,14 @@ describe("CursorAdapterV2", () => {
         return {
           orchestration: sent.includes("## T3 Code orchestration"),
           devices: sent.includes("## T3 Code devices"),
+          rules: sent.includes("<user_agent_rules>"),
         };
       });
-      const told = (orchestration: boolean, devices: boolean) => ({ orchestration, devices });
+      const told = (orchestration: boolean, devices: boolean, rules = false) => ({
+        orchestration,
+        devices,
+        rules,
+      });
 
       yield* setDeviceAccess(true);
       assert.deepEqual(yield* send(), told(false, true));
@@ -917,6 +925,11 @@ describe("CursorAdapterV2", () => {
       yield* setDeviceAccess(true);
       assert.deepEqual(yield* send(), told(false, true), "device access turned on later");
       assert.deepEqual(yield* send(), told(false, false));
+      yield* Ref.set(agentRules, "Answer in Portuguese.");
+      assert.deepEqual(yield* send(), told(false, false, true), "rules added mid-conversation");
+      assert.deepEqual(yield* send(), told(false, false));
+      yield* Ref.set(agentRules, "Answer in English.");
+      assert.deepEqual(yield* send(), told(false, false, true), "changed rules are sent again");
 
       const keptTurn = lastProviderTurn!;
       yield* send();
@@ -947,7 +960,7 @@ describe("CursorAdapterV2", () => {
       );
       assert.deepEqual(
         yield* send(false, true),
-        told(true, true),
+        told(true, true, true),
         "the rewound conversation may have dropped instructions a later turn carried",
       );
 
@@ -969,7 +982,7 @@ describe("CursorAdapterV2", () => {
       providerThread = rolledBack.providerThread;
       assert.deepEqual(
         yield* send(false, false),
-        told(true, true),
+        told(true, true, true),
         "the fresh agent after a rollback has been told nothing",
       );
     }).pipe(

@@ -2,6 +2,7 @@ import { assert, describe, expect, it } from "@effect/vitest";
 import { EnvironmentId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
 
 import {
+  T3_AGENT_RULES_ENV,
   T3_MCP_BEARER_ENV,
   T3_MCP_URL_ENV,
   T3_PI_RUNTIME_MODE_ENV,
@@ -70,6 +71,7 @@ describe("pi T3 MCP injection", () => {
     assert.equal(launch.env[T3_MCP_BEARER_ENV], "secret-pi-token");
     assert.equal(launch.env[T3_PI_RUNTIME_MODE_ENV], "approval-required");
     assert.equal(launch.env[T3_PI_MCP_EXTENSION_PATH_ENV], "/tmp/cache/pi-t3-mcp-extension.ts");
+    assert.isUndefined(launch.env[T3_AGENT_RULES_ENV]);
 
     const permissionOnly = buildPiRpcLaunch({
       launchArgs: [],
@@ -77,10 +79,12 @@ describe("pi T3 MCP injection", () => {
         [T3_MCP_URL_ENV]: "http://127.0.0.1:9999/stale",
         [T3_MCP_BEARER_ENV]: "stale-token",
         [T3_PI_MCP_EXTENSION_PATH_ENV]: "/stale/extension.ts",
+        [T3_AGENT_RULES_ENV]: "stale rules",
       },
       mcpSession: undefined,
       extensionPath: "/tmp/cache/pi-t3-mcp-extension.ts",
       runtimeMode: "auto-accept-edits",
+      agentRules: "<user_agent_rules>\nRULE\n</user_agent_rules>",
     });
     assert.deepEqual(permissionOnly.args, [
       "--mode",
@@ -91,6 +95,10 @@ describe("pi T3 MCP injection", () => {
     assert.isUndefined(permissionOnly.env[T3_MCP_URL_ENV]);
     assert.isUndefined(permissionOnly.env[T3_MCP_BEARER_ENV]);
     assert.equal(permissionOnly.env[T3_PI_RUNTIME_MODE_ENV], "auto-accept-edits");
+    assert.equal(
+      permissionOnly.env[T3_AGENT_RULES_ENV],
+      "<user_agent_rules>\nRULE\n</user_agent_rules>",
+    );
     assert.equal(
       permissionOnly.env[T3_PI_MCP_EXTENSION_PATH_ENV],
       "/tmp/cache/pi-t3-mcp-extension.ts",

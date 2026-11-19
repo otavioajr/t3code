@@ -1,5 +1,8 @@
 import type { V2TurnStartParams__AdditionalContextEntry } from "effect-codex-app-server/schema";
-import { buildRuntimeInstructions } from "@t3tools/provider-core/server/runtimeInstructions";
+import {
+  buildRuntimeInstructions,
+  userAgentRules,
+} from "@t3tools/provider-core/server/runtimeInstructions";
 
 import {
   T3_CODE_BROWSER_TOOL_INSTRUCTIONS,
@@ -57,4 +60,49 @@ export function buildCodexAdditionalContext(
     },
     ...(tools ? { t3_code_tools: { kind: "application", value: tools } } : {}),
   };
+}
+
+const utf8Bytes = (text: string) => Buffer.byteLength(text, "utf8");
+
+/** Splits at line breaks where it can, and inside a line only when the line alone is too long. */
+function splitByUtf8Bytes(text: string, maxBytes: number): ReadonlyArray<string> {
+  const chunks: Array<string> = [];
+  let current = "";
+  const pushPiece = (piece: string) => {
+    const candidate = current ? `${current}\n${piece}` : piece;
+    if (utf8Bytes(candidate) <= maxBytes) {
+      current = candidate;
+      return;
+    }
+    if (current) chunks.push(current);
+    current = "";
+    if (utf8Bytes(piece) <= maxBytes) {
+      current = piece;
+      return;
+    }
+    for (const char of piece) {
+      if (utf8Bytes(current + char) > maxBytes) {
+        chunks.push(current);
+        current = "";
+      }
+      current += char;
+    }
+  };
+  for (const line of text.split("\n")) pushPiece(line);
+  if (current) chunks.push(current);
+  return chunks;
+}
+
+/** The environment's agent rules, split to fit Codex's per-entry cap. */
+export function buildCodexAgentRulesContext(
+  agentInstructions: string,
+): Record<string, V2TurnStartParams__AdditionalContextEntry> {
+  const rules = userAgentRules(agentInstructions);
+  if (!rules) return {};
+  return Object.fromEntries(
+    splitByUtf8Bytes(rules, CODEX_ADDITIONAL_CONTEXT_VALUE_MAX_BYTES).map((value, index) => [
+      `t3_code_user_rules_${String(index + 1).padStart(2, "0")}`,
+      { kind: "application" as const, value },
+    ]),
+  );
 }

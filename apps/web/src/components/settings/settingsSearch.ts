@@ -699,6 +699,15 @@ export const SETTINGS_SEARCH_ITEMS = [
     scope: "project-defaults",
   },
   {
+    id: "agent-instructions",
+    title: msg("Agent rules"),
+    to: "/settings/providers",
+    scope: "environment",
+    searchTerms: [
+      msg("instructions system prompt rules guidelines agents.md claude.md custom global"),
+    ],
+  },
+  {
     id: "compact-idle-threads",
     title: msg("Compact idle threads"),
     to: "/settings/providers",

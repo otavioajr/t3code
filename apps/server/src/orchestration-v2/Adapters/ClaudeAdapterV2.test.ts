@@ -843,6 +843,8 @@ describe("ClaudeAdapterV2 native protocol logging", () => {
       allowedTools: overrides.allowedTools ?? [],
       mcpServers: overrides.mcpServers ?? {},
       environment: {},
+      agentInstructions: "Answer in Portuguese.",
+      appendSystemPromptFileText: "File sentinel\n",
     });
     assert.isObject(options.systemPrompt);
     const systemPrompt = options.systemPrompt as {
@@ -855,6 +857,11 @@ describe("ClaudeAdapterV2 native protocol logging", () => {
     assert.include(systemPrompt.append ?? "", "Use `delegate_task`");
     assert.include(systemPrompt.append ?? "", "call `t3_background_wait`");
     assert.notInclude(systemPrompt.append ?? "", "## T3 Code devices");
+    // The user's own launch-argument text stays last, so it can still override the rules.
+    assert.match(
+      systemPrompt.append ?? "",
+      /<user_agent_rules>\nAnswer in Portuguese\.\n<\/user_agent_rules>\n\nFile sentinel$/,
+    );
     const logged = ClaudeAdapterV2.loggedClaudeQueryOptions(options);
     assert.equal(logged.hasMcpServers, true);
     assert.notInclude(JSON.stringify(logged), "secret-claude-token");

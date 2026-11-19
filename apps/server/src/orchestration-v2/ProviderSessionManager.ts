@@ -449,6 +449,13 @@ export const layerWithOptions = (
             Effect.map((settings) => settings.promptSuggestionsEnabled),
             Effect.orElseSucceed(() => false),
           );
+      // Read live like the labs flag above: per turn where the provider resends instructions.
+      const agentInstructions = Option.isNone(serverSettings)
+        ? Effect.succeed("")
+        : serverSettings.value.getSettings.pipe(
+            Effect.map((settings) => settings.agentInstructions),
+            Effect.orElseSucceed(() => ""),
+          );
       const agentAccessSettings = Effect.fn("ProviderSessionManagerV2.agentAccessSettings")(
         function* (threadId: ThreadId) {
           if (Option.isNone(serverSettings)) return { browser: true, device: false };
@@ -3053,6 +3060,7 @@ export const layerWithOptions = (
                     modelSelection: input.modelSelection,
                     runtimePolicy: input.runtimePolicy,
                     promptSuggestions: promptSuggestionsEnabled,
+                    agentInstructions,
                     ...(input.resumeFromSession === undefined
                       ? {}
                       : { resumeFromSession: input.resumeFromSession }),

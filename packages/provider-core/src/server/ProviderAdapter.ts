@@ -526,6 +526,8 @@ export interface ProviderAdapterV2OpenSessionInput {
   readonly runtimePolicy: ProviderAdapterV2RuntimePolicy;
   /** Labs flag, read live: emit `prompt_suggestion.updated` after completed turns, where the provider can. */
   readonly promptSuggestions?: Effect.Effect<boolean>;
+  /** The environment's "Agent rules" setting, read live; "" when unset. */
+  readonly agentInstructions?: Effect.Effect<string>;
   readonly resumeFromSession?: OrchestrationV2ProviderSession;
   readonly initialNativeThreadId?: string;
   readonly initialProviderItemIdentityVersion?: 2;

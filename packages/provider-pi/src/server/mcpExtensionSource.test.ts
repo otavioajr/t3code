@@ -72,14 +72,56 @@ describe("Pi orchestration prompt section", () => {
       ],
     },
   ])("appends guidance $name", async ({ events }) => {
-    const bridge = await loadMcpBridge();
+    const bridge = await loadMcpBridge({
+      agentRules: "<user_agent_rules>\nRULE\n</user_agent_rules>",
+    });
     const hook = bridge.handlers.get("before_agent_start")!;
     for (const event of events) {
       const result = await hook(event, { ui: { notify: assert.fail } });
       assert.isDefined(result);
-      assert.isTrue(result!.systemPrompt.startsWith(`${event.systemPrompt}\n\n`));
+      assert.isTrue(
+        result!.systemPrompt.startsWith(
+          `${event.systemPrompt}\n\n<user_agent_rules>\nRULE\n</user_agent_rules>\n\n`,
+        ),
+      );
       assert.include(result!.systemPrompt, "orchestrator_capabilities");
     }
+  });
+
+  it("fills the rules and orchestration sections on Pi builds that render sections", async () => {
+    const bridge = await loadMcpBridge({ agentRules: "RULES" });
+    const sections: Record<string, string> = {};
+    const result = await bridge.handlers.get("before_agent_start")!(
+      { systemPrompt: "base", systemPromptOptions: { sections } },
+      { ui: { notify: assert.fail } },
+    );
+    assert.isUndefined(result);
+    assert.equal(sections.t3_code_user_rules, "RULES");
+    assert.include(sections.t3_code_orchestration, "orchestrator_capabilities");
+  });
+
+  it("adds the rules without MCP credentials", async () => {
+    const agentStart: Array<(event: unknown) => unknown> = [];
+    const source = NodeModule.stripTypeScriptTypes(
+      PI_T3_MCP_EXTENSION_SOURCE.replace(/^import .*;$/gm, "").replace(
+        "export default async function",
+        "async function",
+      ),
+    );
+    await NodeVM.runInNewContext(`${source}\nt3McpExtension(pi)`, {
+      process: { env: { T3_AGENT_RULES: "RULES" }, argv: [] },
+      pi: {
+        on: (name: string, handler: (event: unknown) => unknown) => {
+          if (name === "before_agent_start") agentStart.push(handler);
+        },
+        registerCommand: () => {},
+        getCommands: () => [],
+      },
+    });
+    // The first handler is the project-trust notice; the last carries the rules.
+    assert.deepEqual(agentStart.at(-1)!({ systemPrompt: "base" }), {
+      systemPrompt: "base\n\nRULES",
+    });
   });
 });
 
