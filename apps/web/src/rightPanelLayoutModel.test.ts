@@ -284,8 +284,17 @@ describe("minimize and restore", () => {
     expect(shape(restoreRightPanelGroup(changed, minimize))).toEqual(expected);
   });
 
+  it("minimizes only the shown tab and restores it into its group", () => {
+    const layout = defaultRightPanelLayout(["a", "b", "c"], "b");
+    const minimized = minimizeRightPanelGroup(layout, "g1", 1);
+    expect(shape(minimized)).toEqual([[">a,c*"]]);
+    expect(minimized.minimized.map((entry) => entry.group.surfaceIds)).toEqual([["b"]]);
+    const cardId = minimized.minimized[0]!.group.id;
+    expect(shape(restoreRightPanelGroup(minimized, cardId))).toEqual([[">a,b*,c"]]);
+  });
+
   it("queues cards in minimize order and refocuses a visible group", () => {
-    const columns = moveRightPanelSurface(threeTabs, "c", {
+    const columns = moveRightPanelSurface(twoTabs, "b", {
       kind: "column",
       groupId: "g1",
       side: "right",
@@ -299,7 +308,10 @@ describe("minimize and restore", () => {
   });
 
   it("clears maximize when the maximized group is minimized", () => {
-    const layout: RightPanelLayout = { ...twoTabs, maximizedGroupId: "g1" };
+    const layout: RightPanelLayout = {
+      ...defaultRightPanelLayout(["a"], "a"),
+      maximizedGroupId: "g1",
+    };
     expect(minimizeRightPanelGroup(layout, "g1", 1)).not.toHaveProperty("maximizedGroupId");
   });
 });

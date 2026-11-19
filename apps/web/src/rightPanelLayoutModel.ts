@@ -27,6 +27,9 @@ export interface RightPanelGroupOrigin {
   /** Columns known to sit left and right of an owned column, nearest first. */
   readonly leftColumnIds?: readonly string[];
   readonly rightColumnIds?: readonly string[];
+  /** A single tab minimized out of this group, which it rejoins at `tabIndex` while visible. */
+  readonly tabOfGroupId?: string;
+  readonly tabIndex?: number;
 }
 
 export interface MinimizedRightPanelGroup {
@@ -478,6 +481,7 @@ export function minimizeRightPanelGroup(
   const location = locateGroup(layout, groupId);
   if (!location) return layout;
   const group = location.column.groups[location.groupIndex]!;
+  if (group.surfaceIds.length > 1) return minimizeRightPanelTab(layout, location, group, now);
   const ownColumn = location.column.groups.length === 1;
   const columnId = location.column.id;
   // Columns already minimized beside this one are only known from their own origins.
@@ -531,6 +535,48 @@ export function minimizeRightPanelGroup(
   return clearStaleMaximize(refocus(next, layout));
 }
 
+function minimizeRightPanelTab(
+  layout: RightPanelLayout,
+  location: NonNullable<ReturnType<typeof locateGroup>>,
+  group: RightPanelGroup,
+  now: number,
+): RightPanelLayout {
+  const surfaceId = group.activeSurfaceId;
+  const remaining = prunedGroup(group, (id) => id !== surfaceId);
+  return {
+    ...layout,
+    columns: layout.columns.map((column, index) =>
+      index === location.columnIndex
+        ? {
+            ...column,
+            groups: column.groups.map((entry) => (entry.id === group.id ? remaining : entry)),
+          }
+        : column,
+    ),
+    minimized: [
+      ...layout.minimized,
+      {
+        group: {
+          id: nextId(layout, "g"),
+          surfaceIds: [surfaceId],
+          activeSurfaceId: surfaceId,
+          size: group.size,
+        },
+        origin: {
+          columnId: location.column.id,
+          columnIndex: location.columnIndex,
+          columnSize: location.column.size,
+          groupIndex: location.groupIndex,
+          ownColumn: false,
+          tabOfGroupId: group.id,
+          tabIndex: group.surfaceIds.indexOf(surfaceId),
+        },
+        minimizedAt: now,
+      },
+    ],
+  };
+}
+
 /** Puts a minimized group back where it was; a vanished slot falls back to the last column. */
 export function restoreRightPanelGroup(
   layout: RightPanelLayout,
@@ -540,6 +586,19 @@ export function restoreRightPanelGroup(
   if (!entry) return layout;
   const minimized = layout.minimized.filter((candidate) => candidate !== entry);
   const { group, origin } = entry;
+  const home = findRightPanelGroup(layout, origin.tabOfGroupId ?? null);
+  if (home) {
+    const surfaceIds = [...home.surfaceIds];
+    surfaceIds.splice(
+      Math.min(origin.tabIndex ?? surfaceIds.length, surfaceIds.length),
+      0,
+      ...group.surfaceIds,
+    );
+    const rejoined = mapGroups({ ...layout, minimized }, (candidate) =>
+      candidate.id === home.id ? { ...candidate, surfaceIds } : candidate,
+    );
+    return setActive(rejoined, home.id, group.activeSurfaceId);
+  }
   const columnIndex = layout.columns.findIndex((column) => column.id === origin.columnId);
   let columns: RightPanelColumn[];
   if (columnIndex >= 0) {
@@ -677,6 +736,9 @@ export function parsePersistedRightPanelLayout(value: unknown): RightPanelLayout
                   (id): id is string => typeof id === "string",
                 ),
               }
+            : {}),
+          ...(typeof origin.tabOfGroupId === "string"
+            ? { tabOfGroupId: origin.tabOfGroupId, tabIndex: number("tabIndex", 0) }
             : {}),
         },
         minimizedAt: typeof entry.minimizedAt === "number" ? entry.minimizedAt : 0,
