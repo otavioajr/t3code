@@ -8,6 +8,7 @@ import {
   ProviderTurnId,
   RunAttemptId,
   ThreadId,
+  withMessageSenderNote,
 } from "@t3tools/contracts";
 import type * as DateTime from "effect/DateTime";
 import * as Context from "effect/Context";
@@ -463,11 +464,14 @@ export const layer: Layer.Layer<
               ...(appContext.length === 0 ? {} : { appContext }),
               message: {
                 messageId: message.id,
-                text: projectComposerContextForProvider({
-                  text: message.text,
-                  records: message.context?.records ?? [],
-                  consultAdvisor: message.context?.consultAdvisor,
-                }),
+                text: withMessageSenderNote(
+                  message,
+                  projectComposerContextForProvider({
+                    text: message.text,
+                    records: message.context?.records ?? [],
+                    consultAdvisor: message.context?.consultAdvisor,
+                  }),
+                ),
                 attachments: message.attachments,
                 createdBy: message.createdBy,
                 creationSource: message.creationSource,

@@ -21,6 +21,7 @@ import {
 } from "~/components/ui/select";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import type { SideChatParentPanel } from "~/lib/sideChatPane";
+import { linkedThreadTitle } from "~/linkedThreadSurface";
 import { cn } from "~/lib/utils";
 import { useThreadPreviewState } from "~/previewStateStore";
 import type { MinimizedRightPanelGroup } from "~/rightPanelLayoutModel";
@@ -38,7 +39,7 @@ import { observedTerminalOutputAtom } from "~/state/terminalSessions";
 import { m, type MessageResolver } from "../../i18n/messages";
 import { DeviceStreamView } from "../device/DeviceStreamView";
 import { previewBridge } from "../preview/previewBridge";
-import SideChatPane from "./SideChatPane";
+import SideThreadPane from "./SideThreadPane";
 
 const CARD_CORNER_RADIUS = 12;
 // Above panel browser views (30), below the floating mini player.
@@ -59,13 +60,18 @@ function cardTitle(surface: RightPanelSurface, resolve: MessageResolver = m): st
     case "pull-request":
       return `#${surface.number}`;
     case "pull-requests":
-      return resolve(msg("Pull requests"));
+      return resolve(msg("Linked items"));
     case "plan":
       return resolve(msg("Plan"));
     case "issue":
       return /^\d+$/.test(surface.key) ? `#${surface.key}` : surface.key;
-    case "side-chat":
-      return resolve(msg("Side chat"));
+    case "thread":
+      return resolve(msg("Thread"));
+    case "linked-thread":
+      return linkedThreadTitle(
+        surface,
+        resolve(msg("Thread on {label}", { label: surface.label })),
+      );
     case "diff":
       return resolve(msg("Diff"));
     case "files":
@@ -147,7 +153,7 @@ function MinimizedPanelCard(props: {
   if (!active) return null;
   const title = titleOf(active);
   const store = useRightPanelStore.getState;
-  const sideChat = active.kind === "side-chat";
+  const sideChat = active.kind === "thread";
   // A desktop browser view is native and covers the DOM, so its controls cannot sit over it or
   // wait for a hover the page swallows; they stay pinned above the preview. A side chat keeps its
   // own header, so its card controls stay out of the way of it.
@@ -183,10 +189,10 @@ function MinimizedPanelCard(props: {
         data-minimized-panel-card={groupId}
         className={cardClassName}
       >
-        <SideChatPane
+        <SideThreadPane
           key={`${scopedThreadKey(threadRef)}:${active.id}`}
           parentRef={threadRef}
-          threadId={active.threadId}
+          surface={active}
           parentPanel={props.sideChatParentPanel}
           onClose={() => store().closeGroup(threadRef, groupId)}
           actions={restoreButton}
@@ -288,11 +294,11 @@ function CardPreview(props: {
       return (
         <TerminalCardPreview threadRef={props.threadRef} terminalId={surface.activeTerminalId} />
       );
-    case "side-chat":
+    case "thread":
       return (
-        <SideChatPane
+        <SideThreadPane
           parentRef={props.threadRef}
-          threadId={surface.threadId}
+          surface={surface}
           parentPanel={props.sideChatParentPanel}
           onClose={() => useRightPanelStore.getState().closeSurface(props.threadRef, surface.id)}
         />
