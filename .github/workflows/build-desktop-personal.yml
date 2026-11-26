@@ -1,6 +1,6 @@
 name: Build desktop (personal)
 
-# macOS and Windows installers for personal installs of this fork, published as
+# Windows installers (macOS is built locally) for personal installs of this fork, published as
 # a GitHub release that installed apps update from. Every push to daily builds
 # one; it can also run by hand from the Actions tab. Builds carry no T3 Connect config. The Windows installer embeds
 # the Linux CLI archive as its WSL runtime, the same way release-desktop.yml does.
@@ -52,7 +52,11 @@ jobs:
           sha=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${BUILD_REF}" --jq .sha)
           base=$(gh api "repos/${GITHUB_REPOSITORY}/contents/apps/desktop/package.json?ref=${sha}" \
             --jq '.content | @base64d | fromjson | .version')
-          echo "version=${base}-fork.${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+          # macOS releases are also cut locally, so the next number comes from
+          # the newest fork release rather than the run number.
+          last=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 200 --json tagName --jq '.[].tagName' \
+            | sed -n 's/.*-fork\.\([0-9][0-9]*\)$/\1/p' | sort -n | tail -1)
+          echo "version=${base}-fork.$(( ${last:-0} + 1 ))" >> "$GITHUB_OUTPUT"
           echo "sha=${sha}" >> "$GITHUB_OUTPUT"
 
   # The WSL backend runs this archive inside the distro. Without it the Windows
@@ -147,13 +151,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # GitHub macOS runners never start for this fork, so macOS is built
+        # locally and uploaded to this release with `gh release upload`.
         include:
-          - label: macOS arm64
-            runner: macos-15
-            platform: mac
-            target: dmg
-            arch: arm64
-            rust_target: aarch64-apple-darwin
           - label: Windows x64
             runner: windows-latest
             platform: win
@@ -315,5 +315,5 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --target "$SHA" \
             --title "T3 Code ${VERSION}" \
-            --notes "Personal build of ${BUILD_REF} at ${SHA}." \
+            --notes "Personal build of ${BUILD_REF} at ${SHA}. macOS assets are uploaded separately." \
             --latest
